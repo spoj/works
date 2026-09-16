@@ -78,6 +78,6 @@ Sharing existing works also shares their WIPs and potentially future additions. 
 
 Read followed collections' READMEs through existing tools. Missing access need not block personal scaffolding; record the gap. Obtain readable trees from Git, drives, sync, export or other existing tools while preserving collection-relative paths. Establish canonical URLs independently of local download paths.
 
-Index all Markdown, including WIP. See the commands and limits in `SKILL.md`. Ask before a potentially large initial retrieval. Use bounded `--partial` batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Keep source capture/version information distinct from indexing time.
+Index all Markdown, including WIP. Read [INDEX.md](INDEX.md) for commands and limits. Ask before a potentially large initial retrieval. Use bounded `--partial` batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Keep source capture/version information distinct from indexing time.
 
 Keep the follow list independent of SQLite so missing collections remain visible and the cache is rebuildable. Finish by reporting created/migrated files, Git choice, follows, index coverage and unresolved permissions. Do not claim provider synchronization merely from local presence.

@@ -41,8 +41,9 @@ A person's shared folder and a team's shared folder are ordinary collections. WI
 
 ## Instruction ownership
 
-- [`SKILL.md`](skills/works/SKILL.md): upstream method, finalization, sharing and indexing.
-- [`SETUP.md`](skills/works/SETUP.md): upstream setup procedure and examples.
+- [`SKILL.md`](skills/works/SKILL.md): core method, finalization and sharing; roughly 1,000 tokens.
+- [`SETUP.md`](skills/works/SETUP.md): read only for setup or migration.
+- [`INDEX.md`](skills/works/INDEX.md): read only for private indexing or queries.
 - Collection `README.md`: locally owned audience, owner, citation and contribution rules.
 - Optional `AGENTS.md`: user-owned local instructions. Personal setup adds one only when no applicable file exists; updates never overwrite it.
 
