@@ -2,6 +2,8 @@
 
 A growing list of dated contributions, connected by ordinary citations. Prior works and their evidence serve as documentation across time and people. Preserve them; later findings build on or correct them through new works, not revisions of the past.
 
+Works applies independently of how these folders are stored or shared. The agent must understand the surrounding access, visibility and authorization sufficiently to apply it appropriately; Works defines no sharing workflow or permission model.
+
 An [Agent Skills](https://agentskills.io) package. No hosted service, provider adapters or central knowledge registry.
 
 ## Install and start
@@ -20,7 +22,7 @@ Open pi in the intended workspace and ask:
 
 For other compatible agents, add `skills/works/` to their skill search path. The agent confirms the collection folder, audience, Git choice and private follows before writing.
 
-## One layout, personal or shared
+## Collection layout
 
 Use the chosen collection folder directly, including a repository root:
 
@@ -34,14 +36,14 @@ YYYY-MM-DD-some-finding/LOG.md
 - **WIP** holds ongoing work: investigation, calculations, scripts, evidence and preparation of business outputs. A **draft** is an unfinished artifact within it.
 - **Finalize** through editorial review of claims, evidence, scope, uncertainty and links; only then rename the WIP to a dated folder. A **work** is the retained, dated, citable contribution. Finalized does not mean correct or conclusive.
 - The folder date records when that edition was finalized. `LOG.md` states the dates or periods to which its evidence and analysis apply. An unchanged copy retains its date; a new shared edition does not make old evidence new.
-- **Share** means making material available to another **audience** (intended readers). Review the whole work; copy it unchanged when suitable, otherwise prepare a self-contained **shared edition** without changing the original.
+- When adapting a work for other readers, retain a self-contained **shared edition** without changing the original. Review supporting evidence and preserve what references mean in the destination context.
 - Preserve works and their addresses. Substantive corrections belong in new works citing them. Meaning-preserving fixes and brief dated sharing notes may be added in place.
 
-A person's shared folder and a team's shared folder are ordinary collections. WIPs inherit the collection's audience; shared WIPs are not private staging areas. Reading, effective write permission and authority to contribute are separate. Keep private follows and caches outside shared boundaries. Sharing a collection can expose its WIPs and future additions too.
+Check actual storage permissions and task authorization before writing or copying. WIP names and README text do not set storage permissions. Keep personal follows, caches and machine-specific details in suitably private storage; provider-specific procedures belong in local instructions.
 
 ## Instruction ownership
 
-- [`SKILL.md`](skills/works/SKILL.md): core method, finalization and sharing; roughly 1,000 tokens.
+- [`SKILL.md`](skills/works/SKILL.md): core method, finalization and reuse; roughly 1,000 tokens.
 - [`SETUP.md`](skills/works/SETUP.md): read only for setup or migration.
 - [`INDEX.md`](skills/works/INDEX.md): read only for private indexing or queries.
 - Collection `README.md`: locally owned audience, owner, citation and contribution rules.
@@ -51,7 +53,7 @@ Keep general guidance in the skill rather than copying it into local files. Chan
 
 ## References and private index
 
-Use ordinary relative links locally and `[label](@name/path)` across collections. Each collection's README identifies its referenced collections and nicknames in prose. Names belong to the citing collection; personal follows and access methods stay separate. Sharing a work checks these names in the destination context. Named references are agent-resolved, not browser-clickable links.
+Use ordinary relative links locally and `[label](@name/path)` across collections. Each collection's README identifies its referenced collections and nicknames in prose. Names belong to the citing collection; personal follows and machine-specific access details stay in local instructions. Copying a work must preserve what its names identify in the destination context. Named references are agent-resolved, not browser-clickable links.
 
 The agent supplies local snapshots and source-scoped bindings to [links.py](skills/works/scripts/links.py); it neither reads provider services nor interprets declarations or walks the graph. `set-references B --reference research=D --reference lab=D` replaces B's complete mapping. C may use another name for D. `incoming D` finds both sources, even before D is indexed. Run `--help` for examples or read [INDEX.md](skills/works/INDEX.md).
 

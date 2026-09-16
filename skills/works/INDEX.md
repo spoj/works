@@ -2,7 +2,7 @@
 
 Use [links.py](scripts/links.py) with Python 3.12+ and SQLite FTS5; no third-party dependencies. Choose the Python invocation for the local environment. Run `links.py --help` or `<command> --help` for arguments.
 
-The agent obtains readable snapshots, interprets README reference declarations and identifies collections. The script does not access providers, parse declarations, walk the collection graph or verify permissions. Keep the database and personal follows private.
+The agent obtains readable snapshots, interprets README reference declarations and identifies collections. The script does not access providers, parse declarations, walk the collection graph or verify permissions. Cached content does not establish current access; observe actual permissions and applicable retention policy. Keep the database and personal follows private.
 
 ## Collection names and references
 

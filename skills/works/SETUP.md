@@ -1,6 +1,6 @@
 # Setup
 
-The skill must already be installed. Setup creates a collection, not another copy of the skill or its scripts. General instructions stay upstream; the collection README and optional AGENTS belong to their local owners. Updates do not silently rewrite either file. Propose existing-collection changes separately.
+The skill must already be installed. Setup arranges folders within existing storage; it does not configure sharing or install another copy of the skill. General instructions stay upstream; the collection README and optional AGENTS belong to their local owners. Updates do not silently rewrite either file. Propose existing-collection changes separately.
 
 ## Confirm the plan
 
@@ -11,7 +11,7 @@ Inspect the current directory, its contents and enclosing Git worktree. Ask one 
 3. Use Git? Reuse an existing worktree; do not nest another repository.
 4. For a personal workspace, any collections to follow, and where should private instructions and the rebuildable index live?
 
-For shared storage, establish the owner-provided location, the existing read/write route and how effective provider permissions are checked. Writing into a synced folder may share immediately. Do not infer audience or contribution authority from the current user's ability to open a file.
+Use the storage's existing access procedures to check actual permissions and task authorization. Local sync access does not establish server permissions. Record useful provider-specific procedures in local instructions; writing into a synced folder may expose content immediately.
 
 Confirm before writing. Preserve existing files; a nonempty directory needs a scoped migration plan. Do not install software, create remotes, push, change sharing permissions or access unrelated sources as part of collection setup.
 
@@ -34,11 +34,10 @@ Write a short README using confirmed facts:
 Contributions and dated checkpoints for <audience>.
 Owner: <person or team>.
 Location: <owner-provided collection location>.
-Contributions and sharing: <who may contribute and what approval/disclosure rules apply>.
-Access: <how effective provider read/write rights are checked>.
+Contribution rules: <who may contribute and what approval/disclosure rules apply>.
 
 Create `_wip_<slug>/` on demand for ongoing work, not only draft writing.
-WIPs have this collection's audience and are not stable citations.
+WIPs are not stable citations.
 Finalize through editorial review, then rename to `YYYY-MM-DD-slug/`.
 The folder date records finalization; `LOG.md` states the finding, evidence,
 applicable dates and uncertainty. Finalized does not mean validated.
@@ -64,15 +63,15 @@ This file contains local instructions; skill updates must not overwrite it.
 <Only local execution/disclosure rules and collection locations.>
 ```
 
-Put private follows and index location here only if this location is private. Record followed collections, local read routes and permission-checking instructions in ordinary prose, separate from the collection's reference declarations. Use an existing personal instruction file elsewhere if the collection is shared. Shared setup does not automatically add AGENTS; an owner may choose collection-level instructions without private machine details.
+Keep personal follows, cache locations and machine-specific access details in private local instructions, separate from reference declarations. Non-sensitive provider procedures may live with the collection. An owner may choose collection-level instructions; setup does not automatically add another AGENTS there.
 
 The default private cache is `<private workspace>/.works/index.sqlite`, never a shared collection's cache. Agree its exclusion from Git before creating it. Do not invent additional evidence exclusions. If Git was requested, commit only the agreed scaffold; no remote or push.
 
-## Existing collections and changed audiences
+## Existing collections
 
 Migrate an existing separate WIP tree to collection-root `_wip_<slug>/` folders without discarding contributions. Update active callers and links. Preserve works and evidence; report historical pointers that cannot be changed without rewriting finished records. There is no legacy WIP container or alias kept after migration.
 
-Sharing existing works also shares their WIPs and potentially future additions. Review content, citations and destination reference names for the new audience. Keep private instructions, follows and caches outside the sharing boundary. If unsuitable, prepare authorized shared editions in a separate shared collection rather than editing finished originals or assuming broader access.
+If the task also changes a folder's sharing, check what the storage will expose—including nested WIPs, instructions and caches—and update local guidance. Where adaptation is needed, retain a new self-contained edition rather than editing the original.
 
 ## Follow and index
 
