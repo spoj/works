@@ -1,101 +1,81 @@
 # Setup
 
-The skill must already be available to the agent. Setup creates a workspace or collection, not another copy of the skill or its scripts.
+The skill must already be installed. Setup creates a collection, not another copy of the skill or its scripts. General instructions stay upstream; the collection README and optional AGENTS belong to their local owners. Updates do not silently rewrite either file. Propose existing-collection changes separately.
 
-The installed skill owns the reusable method. Generated `AGENTS.md` belongs to the user: initialize it once, then let the user and authorized agents edit local instructions. Skill updates change the method, not this file. Keep general guidance in the skill rather than copying it into local instructions. Template changes apply to new setups; propose any existing-workspace change separately. A shared collection's `README.md` similarly belongs to its custodian.
+## Confirm the plan
 
-## Ask before writing
+Inspect the current directory, its contents and enclosing Git worktree. Ask one short batch, skipping answered questions:
 
-Inspect the current directory, its contents and any enclosing Git worktree. Ask one short batch, omitting questions already answered:
+1. Where should the `works/` collection live? Show the resolved path. If already inside the intended `works/`, use it directly rather than creating `works/works/`.
+2. Who owns it, who can read it, and who may contribute under what conditions?
+3. Use Git? Reuse an existing worktree; do not nest another repository.
+4. For a personal workspace, any collections to follow, and where should private instructions and the rebuildable index live?
 
-1. Set up here (`<absolute cwd>`), or somewhere else?
-2. A personal working workspace, or a shared completed-work collection? Default proposal: personal.
-3. Use Git? Reuse an existing worktree rather than nesting another repository.
-4. For a personal workspace, which shared collections should it follow, if any? Names and paths or URLs are enough to start.
+For shared storage, establish canonical addresses, the existing read/write route and how effective provider permissions are checked. Writing into a synced folder may publish immediately. Do not infer audience or publication authority from the current user's ability to open a file.
 
-For a shared collection, establish its intended readers, custodian, canonical location, who may publish under what conditions, and how effective read/write permissions are checked. Its custodian may be a person or a team. Obtain these from local policy or the user; do not infer them from the current agent's access. Confirm that writing into a synced folder may publish immediately.
+Confirm before writing. Preserve existing files; a nonempty directory needs a scoped migration plan. Do not install software, create remotes, push, change sharing permissions or access unrelated sources as part of collection setup.
 
-Confirm the plan before scaffolding. Preserve existing files; a nonempty directory requires a scoped plan, not replacement. Do not install software, create remotes, push, change permissions or access unrelated sources as part of setup.
+## The same scaffold everywhere
 
-## Personal workspace
-
-Create:
+Create the collection folder and `README.md`. Do not create a WIP directory, sample work, nested `works/`, index or scripts there.
 
 ```text
-AGENTS.md
-wip/
 works/
+    README.md
 ```
 
-Write a short `AGENTS.md` using the confirmed answers, along these lines:
+New `_wip_<slug>/LOG.md` and `YYYY-MM-DD-slug/LOG.md` folders are created as work develops. Personal, person-to-person and team collections have the same structure. An entire repository may itself be the collection if the user chooses that location; do not impose another containing workspace.
+
+Write a short README using confirmed facts:
 
 ```markdown
-# Works
+# <Collection name> — Works
 
-Load the installed `works` skill when working with dated contributions here.
-This file contains user-owned local instructions; skill updates must not overwrite it.
-Keep these instructions, WIP, follow list and index private to <owner>.
+Contributions and dated checkpoints for <audience>.
+Custodian: <person or team>.
+Canonical location and citation convention: <location>.
+Publication: <who may contribute and what approval/disclosure rules apply>.
+Access: <how effective provider read/write rights are checked>.
 
-## Local rules
-
-<Only environment-specific execution, disclosure and access instructions.>
-
-## Collections
-
-- My works: `works/`. Audience: <initially owner only>. Canonical root: <location>.
-- <Name>: <canonical shared root>. Read via <path or existing tool>.
-  Check reader access using <established policy/procedure>.
-
-The private, rebuildable index is `.works/index.sqlite`.
+Create `_wip_<slug>/` on demand. Drafts have this collection's audience
+and are not stable citations. Review before renaming to `YYYY-MM-DD-slug/`.
+Each work has a `LOG.md` explaining the question, finding, significance,
+evidence and uncertainty. Inclusion is not independent validation.
+Keep finished works and addresses stable; substantive corrections go
+in new works citing earlier conclusions. Review WIPs without auto-deleting them.
 ```
 
-Use plain English, not a new configuration schema. Omit unused sections and placeholder entries; say explicitly when canonical addresses, access or freshness have not yet been established. A private local collection may use a `file://` directory URL; it is not a portable shared citation address.
+Replace placeholders; omit irrelevant fields rather than inventing infrastructure. Unknown access remains unknown. The README describes policy, not a grant or verification of permission.
 
-Keep follow lists private even when they point to several teams. Do not create a merged published timeline, copy shared collections into personal works, or put personal access details in a shared README.
+## Optional personal instructions
 
-If Git was requested, initialize it only when needed. Agree to exclude `.works/` from version control because it caches other collections' content; do not invent additional evidence exclusions. Add empty `.gitkeep` files in `wip/` and `works/` so cloning preserves the scaffold. Commit only the agreed scaffold, without a remote or push.
+For personal setup, preserve and use an applicable existing `AGENTS.md`. If none exists, add one at the chosen workspace root, or in the collection when that is itself the workspace. Do not create a competing nested AGENTS merely because the collection has a README.
 
-## Shared collection
-
-Create only `README.md`; dated work folders appear when actual contributions are published. No WIP, index database, follow list, scripts or `AGENTS.md` belong here. Hidden Git metadata is optional if explicitly requested.
-
-Write the README in plain language for people and agents:
+Keep it user-owned and short:
 
 ```markdown
-# <Collection name>
+# Local instructions
 
-Completed contributions and dated checkpoints for <audience>.
-Maintained by <person, team or other custodian>.
+Load the installed `works` skill for this collection.
+This file contains local instructions; skill updates must not overwrite it.
 
-Canonical location: <location and citation convention>.
-Reader access: <provider-managed boundary and how to verify it>.
-Publication: <who may contribute, approval and disclosure requirements>.
-Write access: <how to verify effective provider permission and publish>.
-
-Each `YYYY-MM-DD-slug/` folder has a `LOG.md` entry point with the
-question, finding, significance and links to supporting evidence.
-Inclusion means worth retaining, not independently validated.
-Keep finished works and their addresses stable. Publish substantive
-corrections as new works citing the earlier conclusions.
-
-Draft elsewhere. Publish only material authorized for these readers;
-citations and necessary evidence must remain accessible to them.
-Do not depend on material inaccessible to these readers.
-Write permission alone does not authorize a contribution or rewriting finished works.
+<Only local execution/disclosure rules and collection locations.>
 ```
 
-Replace placeholders with confirmed facts. Missing information is unknown, not permission. The README states the procedure; it does not itself verify or grant access rights.
+Put private follows and index location here only if this location is private. Record followed collection names, canonical roots, local read routes and permission-checking instructions in ordinary prose, not a new configuration schema. Use an existing personal instruction file elsewhere if the collection is shared. Shared setup does not automatically add AGENTS; an owner may choose collection-level instructions without private machine details.
 
-A person-to-person share is the same kind of collection. If the user wants to share an existing `works/` folder, review its content and citations for the new audience rather than recreating it. Explain that future additions may inherit the sharing permissions. Keep private instructions, WIP, follow lists and indexes outside the shared boundary. If some works are unsuitable, prepare a separate shared collection with authorized versions; do not silently edit finished originals or change permissions during setup.
+The default private cache is `<private workspace>/.works/index.sqlite`, never a shared collection's cache. Agree its exclusion from Git before creating it. Do not invent additional evidence exclusions. If Git was requested, commit only the agreed scaffold; no remote or push.
 
-## Following and first indexing
+## Existing collections and changed audiences
 
-Read each followed collection's README through an existing access route. Keep read access separate from authority to publish or redistribute. Missing access need not block personal scaffolding; record the unresolved location instead of claiming it was checked.
+Migrate an existing separate WIP tree to collection-root `_wip_<slug>/` folders without discarding contributions. Update active callers and links. Preserve finished works and evidence; report historical pointers that cannot be changed without rewriting finished records. There is no legacy WIP container or alias kept after migration.
 
-The indexer consumes a local readable tree, whether obtained from Git, a mounted drive, sync, export or another existing tool. It has no provider adapters. Establish a path-addressable canonical directory URL independently of that local tree. Preserve all collection-relative paths, and supply source version/capture information when known.
+Sharing existing works also shares their WIPs and potentially future additions. Review content and citations for the new audience. Keep private instructions, follows and caches outside the sharing boundary. If unsuitable, prepare authorized renditions in a separate shared collection rather than editing finished originals or assuming broader access.
 
-Initialize the personal database by indexing the empty local `works/` collection as a complete snapshot. Use the command examples in `SKILL.md`. For followed collections, ask before a potentially large initial retrieval. Index all Markdown, but allow bounded batches with `--partial` so setup need not wait for the entire history. Only use `--complete` for a full snapshot, never for a selected download directory.
+## Follow and index
 
-Record the private follow list independently of the database so the index can be rebuilt. Collections not yet indexed remain explicit gaps; compare the follow list with index status during retrieval. Do not silently treat the registered database collections as the entire followed set.
+Read followed collections' READMEs through existing tools. Missing access need not block personal scaffolding; record the gap. Obtain readable trees from Git, drives, sync, export or other existing tools while preserving collection-relative paths. Establish canonical URLs independently of local download paths.
 
-Finish by reporting the created files, Git choice, followed collections, indexing coverage and unresolved access questions. Do not publish a sample work merely to demonstrate setup.
+Index all Markdown, including WIP. See the commands and limits in `SKILL.md`. Ask before a potentially large initial retrieval. Use bounded `--partial` batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Keep source capture/version information distinct from indexing time.
+
+Keep the follow list independent of SQLite so missing collections remain visible and the cache is rebuildable. Finish by reporting created/migrated files, Git choice, follows, index coverage and unresolved permissions. Do not claim provider synchronization merely from local presence.
