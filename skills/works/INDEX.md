@@ -24,6 +24,8 @@ python "<skill>/scripts/links.py" status
 
 `incoming` and `outgoing` take an index key and optional literal collection-relative file/directory path; omission means the whole collection. Quote paths with spaces; do not URL-encode them. Incoming finds citations from every indexed source. Both also accept an ordinary HTTP(S)/file URL instead of a key and path.
 
+Each citation includes `context`: a short excerpt around that occurrence in the cached source paragraph or list item, not a relationship label or summary. Whitespace is collapsed, the cited link is shown as its label (bare URLs as `[link]`), and clipping is marked with `...`. Context is bounded to 320 characters plus clipping markers; the full destination and source line remain separate. Read the source for qualifications beyond the excerpt.
+
 `index --url-root URL` optionally maps a path-addressable provider URL prefix to a collection. Omission removes that URL mapping, not identity or reference bindings. Without it, named/local references still work; results have no generated browser URL. Opaque sharing URLs remain external citations, not invented path mappings. Existing ordinary URL citations resolve to known roots; alternate URLs are not inferred.
 
 ## Coverage and refresh

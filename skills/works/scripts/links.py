@@ -16,6 +16,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 _DEFINITION = re.compile(r" {0,3}\[([^]\n]+)\]:[ \t]*(.*)$")
 _URL = re.compile(r"(?:https?|file)://[^\s<>\"'`]+")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_BLOCK_START = re.compile(r" {0,3}(?:[-+*]|\d+[.)]|#{1,6})\s")
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,8 @@ class Link:
     source: Path
     line: int
     destination: str
+    start: int
+    end: int
 
 
 def _unescape(value: str) -> str:
@@ -134,7 +137,7 @@ def _line_links(masked: str, original: str, source: Path, number: int, refs: dic
         if destination is None:
             i += 1
             continue
-        links.append(Link(source, number, destination))
+        links.append(Link(source, number, destination, i, end + 1))
         masked = masked[:i] + " " * (end + 1 - i) + masked[end + 1:]
         i = end + 1
     for match in _URL.finditer(masked):
@@ -142,7 +145,7 @@ def _line_links(masked: str, original: str, source: Path, number: int, refs: dic
         for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
             while destination.endswith(closing) and destination.count(closing) > destination.count(opening):
                 destination = destination[:-1]
-        links.append(Link(source, number, destination))
+        links.append(Link(source, number, destination, match.start(), match.start() + len(destination)))
     return links
 
 
@@ -152,6 +155,28 @@ def parse_markdown(text: str, source: str | Path = Path()) -> list[Link]:
     return [link for number, line in enumerate(visible)
             if line is not None and number not in definitions
             for link in _line_links(line, raw[number], Path(source), number + 1, refs)]
+
+
+def citation_context(lines: list[str], link: Link) -> str:
+    line = link.line - 1
+    first = last = line
+    while (first > 0 and lines[first - 1].strip() and not _BLOCK_START.match(lines[first])
+           and not _DEFINITION.fullmatch(lines[first - 1])):
+        first -= 1
+    while (last + 1 < len(lines) and lines[last + 1].strip() and not _BLOCK_START.match(lines[last + 1])
+           and not _DEFINITION.fullmatch(lines[last + 1])):
+        last += 1
+    citation = lines[line][link.start:link.end]
+    label = citation[:_end(citation, 0, "[", "]") + 1] if citation.startswith("[") else "[link]"
+    if len(label) > 80:
+        label = label[:77] + "..."
+    before = re.sub(r"\s+", " ", "\n".join(lines[first:line] + [lines[line][:link.start]])).lstrip()
+    after = re.sub(r"\s+", " ", "\n".join([lines[line][link.end:]] + lines[line + 1:last + 1])).rstrip()
+    text = before + label + after
+    start = max(0, len(before) - (320 - len(label)) // 2)
+    end = min(len(text), start + 320)
+    start = max(0, end - 320)
+    return ("... " if start else "") + text[start:end] + (" ..." if end < len(text) else "")
 
 
 def normalize_url(value: str) -> str:
@@ -366,12 +391,14 @@ def query(db: sqlite3.Connection, command: str, value: str, limit: int = 50, pat
             requested = {"collection": value, "path": collection_path(path)}
         cached = {(row[0], row[1]) for row in db.execute("SELECT collection, path FROM files")}
         rows = []
+        contexts = {}
         for row in db.execute("""
-            SELECT files.collection, files.path, files.indexed, links.line, links.destination
+            SELECT files.id AS source_id, files.collection, files.path, files.indexed, links.line, links.destination
             FROM links JOIN files ON files.id = links.source
-            ORDER BY files.collection, files.path, links.line
+            ORDER BY files.collection, files.path, links.line, links.rowid
         """):
             item = dict(row)
+            source_id = item.pop("source_id")
             try:
                 target = resolve_reference(item["collection"], item["path"], item["destination"], collections)
             except ValueError as error:
@@ -391,6 +418,13 @@ def query(db: sqlite3.Connection, command: str, value: str, limit: int = 50, pat
                 elif (collections[target["collection"]]["mode"] == "complete"
                       and target["path"].lower().endswith(".md")):
                     target["status"] = "missing"
+            if source_id not in contexts:
+                body = db.execute("SELECT body FROM texts WHERE rowid = ?", (source_id,)).fetchone()[0]
+                lines = body.splitlines()
+                contexts[source_id] = {}
+                for link in parse_markdown(body):
+                    contexts[source_id].setdefault((link.line, link.destination), []).append(citation_context(lines, link))
+            item["context"] = contexts[source_id][(item["line"], item["destination"])].pop(0)
             item["target"] = target
             rows.append(item)
             if len(rows) > limit:
@@ -451,8 +485,8 @@ set-references replaces the whole source mapping. No graph walking is performed.
     forget = commands.add_parser("forget", help="clear cached content, retaining identity and incoming references")
     forget.add_argument("collection")
     for command in ("incoming", "outgoing", "search"):
-        sub = commands.add_parser(command, help={"incoming": "find citations to a collection, work or file",
-                                                 "outgoing": "inspect citations from a collection, work or file",
+        sub = commands.add_parser(command, help={"incoming": "find citations and source context pointing to a collection, work or file",
+                                                 "outgoing": "inspect citations and source context from a collection, work or file",
                                                  "search": "phrase search across all indexed Markdown"}[command])
         sub.add_argument("value", metavar="PHRASE" if command == "search" else "COLLECTION_OR_URL")
         if command != "search":

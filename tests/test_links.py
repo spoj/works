@@ -337,6 +337,69 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(matches[0]["state"], "finalized")
         self.assertEqual(matches[0]["path"], "2026-01-02-review/details.md")
 
+    def test_citation_context_preserves_relationship_wording_in_both_directions(self):
+        examples = [
+            "This finding directly contradicts [xx](@d/LOG.md).",
+            "We found the methods in [xx](@d/LOG.md) useful and made one improvement.",
+            "We confirm the boundary established in [xx](@d/LOG.md).",
+            "This supersedes [xx](@d/LOG.md).",
+        ]
+        self.write("LOG.md", "\n\n".join(examples))
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"d": "D"})
+        expected = [text.replace("(@d/LOG.md)", "") for text in examples]
+        for command, collection in [("incoming", "D"), ("outgoing", "team")]:
+            matches = query(self.db, command, collection)["matches"]
+            self.assertEqual([m["context"] for m in matches], expected)
+            self.assertEqual([m["line"] for m in matches], [1, 3, 5, 7])
+            self.assertTrue(all(m["destination"] == "@d/LOG.md" for m in matches))
+
+    def test_context_uses_the_reference_occurrence_not_its_definition(self):
+        self.write("LOG.md", "Unrelated paragraph.\n\nWe do not\nconfirm [xx][study]; the boundary remains uncertain.\n\n[study]: @d/LOG.md\n")
+        self.index(base=None)
+        match = query(self.db, "outgoing", "team")["matches"][0]
+        self.assertEqual(match["context"], "We do not confirm [xx]; the boundary remains uncertain.")
+        self.assertEqual(match["target"]["status"], "unbound")
+
+    def test_context_does_not_mix_neighboring_list_items_or_reference_definitions(self):
+        self.write("LOG.md", "- Earlier unrelated item.\n- We do not\n  confirm [xx][study]; uncertainty remains.\n"
+                   "- Later unrelated item.\n[study]: @d/LOG.md\n")
+        self.index(base=None)
+        match = query(self.db, "outgoing", "team")["matches"][0]
+        self.assertEqual(match["context"], "- We do not confirm [xx]; uncertainty remains.")
+
+    def test_context_is_centered_on_each_repeated_citation_in_a_long_line(self):
+        self.write("LOG.md", "Earlier unrelated details. " * 40 + "We contradict [xx](@d/LOG.md). "
+                   + "Other details. " * 80 + "We confirm [xx](@d/LOG.md). " + "Later details. " * 40)
+        self.index(base=None)
+        matches = query(self.db, "outgoing", "team")["matches"]
+        self.assertIn("We contradict [xx].", matches[0]["context"])
+        self.assertNotIn("We confirm", matches[0]["context"])
+        self.assertIn("We confirm [xx].", matches[1]["context"])
+        self.assertNotIn("We contradict", matches[1]["context"])
+        for match in matches:
+            self.assertLessEqual(len(match["context"]), 328)
+            self.assertTrue(match["context"].startswith("... "))
+            self.assertTrue(match["context"].endswith(" ..."))
+
+    def test_context_retains_cached_wording_after_source_change_and_failed_read(self):
+        source = self.write("LOG.md", "We do not confirm [study](study.md).")
+        self.index()
+        source.write_bytes(b"bad UTF-8 \xff")
+        self.assertEqual(self.index()["mode"], "incomplete")
+        with patch.object(Path, "read_text", side_effect=AssertionError("must use cached text")):
+            matches = query(self.db, "incoming", "team", path="study.md")["matches"]
+        self.assertEqual(matches[0]["context"], "We do not confirm [study].")
+
+    def test_context_keeps_prose_when_the_citation_url_is_long(self):
+        url = "https://example.test/" + "x" * 1000
+        self.write("LOG.md", "This supersedes " + url + ".\n\nWe extend [methods](" + url + ").")
+        self.index(base=None)
+        matches = json.loads(self.cli("outgoing", "team").stdout)["matches"]
+        self.assertEqual([m["context"] for m in matches], ["This supersedes [link].", "We extend [methods]."])
+        self.assertTrue(all(m["destination"] == url for m in matches))
+
     def test_diamond_nicknames_and_source_scoped_names(self):
         for source, body, refs in [
             ("A", "[B](@b/LOG.md) [C](@c/LOG.md)", {"b": "B", "c": "C", "research": "E"}),
