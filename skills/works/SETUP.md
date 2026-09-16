@@ -11,7 +11,7 @@ Inspect the current directory, its contents and enclosing Git worktree. Ask one 
 3. Use Git? Reuse an existing worktree; do not nest another repository.
 4. For a personal workspace, any collections to follow, and where should private instructions and the rebuildable index live?
 
-For shared storage, establish canonical addresses, the existing read/write route and how effective provider permissions are checked. Writing into a synced folder may share immediately. Do not infer audience or contribution authority from the current user's ability to open a file.
+For shared storage, establish the owner-provided location, the existing read/write route and how effective provider permissions are checked. Writing into a synced folder may share immediately. Do not infer audience or contribution authority from the current user's ability to open a file.
 
 Confirm before writing. Preserve existing files; a nonempty directory needs a scoped migration plan. Do not install software, create remotes, push, change sharing permissions or access unrelated sources as part of collection setup.
 
@@ -33,7 +33,7 @@ Write a short README using confirmed facts:
 
 Contributions and dated checkpoints for <audience>.
 Owner: <person or team>.
-Canonical location and citation convention: <location>.
+Location: <owner-provided collection location>.
 Contributions and sharing: <who may contribute and what approval/disclosure rules apply>.
 Access: <how effective provider read/write rights are checked>.
 
@@ -47,7 +47,7 @@ Meaning-preserving fixes and brief dated sharing notes may be added in place.
 Review WIPs without automatically deleting them.
 ```
 
-Replace placeholders; omit irrelevant fields rather than inventing infrastructure. Unknown access remains unknown. The README describes policy, not a grant or verification of permission.
+Replace placeholders; omit irrelevant fields. Identify referenced collections and their nicknames in ordinary README prose, using owner-provided locations. References use `[label](@name/path)`; do not repoint a name to another collection. Referencing does not imply following or access. The README describes policy, not a grant or verification of permission.
 
 ## Optional personal instructions
 
@@ -64,7 +64,7 @@ This file contains local instructions; skill updates must not overwrite it.
 <Only local execution/disclosure rules and collection locations.>
 ```
 
-Put private follows and index location here only if this location is private. Record followed collection names, canonical roots, local read routes and permission-checking instructions in ordinary prose, not a new configuration schema. Use an existing personal instruction file elsewhere if the collection is shared. Shared setup does not automatically add AGENTS; an owner may choose collection-level instructions without private machine details.
+Put private follows and index location here only if this location is private. Record followed collections, local read routes and permission-checking instructions in ordinary prose, separate from the collection's reference declarations. Use an existing personal instruction file elsewhere if the collection is shared. Shared setup does not automatically add AGENTS; an owner may choose collection-level instructions without private machine details.
 
 The default private cache is `<private workspace>/.works/index.sqlite`, never a shared collection's cache. Agree its exclusion from Git before creating it. Do not invent additional evidence exclusions. If Git was requested, commit only the agreed scaffold; no remote or push.
 
@@ -72,11 +72,11 @@ The default private cache is `<private workspace>/.works/index.sqlite`, never a 
 
 Migrate an existing separate WIP tree to collection-root `_wip_<slug>/` folders without discarding contributions. Update active callers and links. Preserve works and evidence; report historical pointers that cannot be changed without rewriting finished records. There is no legacy WIP container or alias kept after migration.
 
-Sharing existing works also shares their WIPs and potentially future additions. Review content and citations for the new audience. Keep private instructions, follows and caches outside the sharing boundary. If unsuitable, prepare authorized shared editions in a separate shared collection rather than editing finished originals or assuming broader access.
+Sharing existing works also shares their WIPs and potentially future additions. Review content, citations and destination reference names for the new audience. Keep private instructions, follows and caches outside the sharing boundary. If unsuitable, prepare authorized shared editions in a separate shared collection rather than editing finished originals or assuming broader access.
 
 ## Follow and index
 
-Read followed collections' READMEs through existing tools. Missing access need not block personal scaffolding; record the gap. Obtain readable trees from Git, drives, sync, export or other existing tools while preserving collection-relative paths. Establish canonical URLs independently of local download paths.
+Read followed collections' READMEs through existing tools. Identify shared targets across different names and supply source-scoped bindings to the indexer. The agent follows references as needed; the script neither interprets prose nor walks collections. Missing access is a gap, not a setup blocker. Obtain readable trees through existing tools, preserving collection-relative paths. A URL root is optional and only valid where URLs map directly to paths.
 
 Index all Markdown, including WIP. Read [INDEX.md](INDEX.md) for commands and limits. Ask before a potentially large initial retrieval. Use bounded `--partial` batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Keep source capture/version information distinct from indexing time.
 

@@ -49,9 +49,13 @@ A person's shared folder and a team's shared folder are ordinary collections. WI
 
 Keep general guidance in the skill rather than copying it into local files. Changes requiring local migration should be proposed separately.
 
-## Private discovery cache
+## References and private index
 
-The bundled script indexes **all Markdown recursively** in supplied collection trees, including supporting files and WIPs, into SQLite full-text and citation indexes. Query states are `wip`, `finalized` and `collection`; these are path-based labels, not proof of review. The agent supplies readable files and canonical addresses through existing tools, excluding and reporting runtime/cache boundaries. The script does not access providers.
+Use ordinary relative links locally and `[label](@name/path)` across collections. Each collection's README identifies its referenced collections and nicknames in prose. Names belong to the citing collection; personal follows and access methods stay separate. Sharing a work checks these names in the destination context. Named references are agent-resolved, not browser-clickable links.
+
+The agent supplies local snapshots and source-scoped bindings to [links.py](skills/works/scripts/links.py); it neither reads provider services nor interprets declarations or walks the graph. `set-references B --reference research=D --reference lab=D` replaces B's complete mapping. C may use another name for D. `incoming D` finds both sources, even before D is indexed. Run `--help` for examples or read [INDEX.md](skills/works/INDEX.md).
+
+The script indexes **all collection Markdown**, including supporting files and WIPs. Query states `wip`, `finalized` and `collection` are path-based labels, not proof of review. Target status distinguishes cached, missing, unchecked, unbound and invalid references. URL roots are optional; logical identity is independent of provider paths.
 
 Complete inventories and partial updates are explicit. “Complete” describes index coverage, not finalization. Failed reads retain earlier cached material with warnings; only a successful complete inventory removes missing files. Queries report coverage, freshness and truncation. Supplement extracted links with full-text searches and source review; the cache cannot prove truth, current permissions or absence of corrections elsewhere.
 

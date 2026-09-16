@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 sys.dont_write_bytecode = True
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "works" / "scripts" / "links.py"
 sys.path.insert(0, str(SCRIPT.parent))
-from links import coverage, database, index_collection, normalize_url, parse_markdown, query
+from links import coverage, database, index_collection, normalize_url, parse_markdown, query, set_references
 
 BASE = "https://example.test/collection/"
 
@@ -41,7 +41,7 @@ class LinksTest(unittest.TestCase):
 
     def index(self, root=None, name="team", base=BASE, complete=True, force=False):
         with self.db:
-            return index_collection(self.db, name, root or self.root, base, complete, "test snapshot", force)
+            return index_collection(self.db, name, root or self.root, complete, "test snapshot", force, base)
 
     def cli(self, *args, cwd=None):
         return subprocess.run(
@@ -107,7 +107,7 @@ class LinksTest(unittest.TestCase):
         self.index(base=base)
         result = query(self.db, "incoming", base + "other")
         self.assertEqual(result["matches"][0]["url"], base + "source/LOG.md")
-        self.assertEqual(result["matches"][0]["target"], base + "other/LOG.md")
+        self.assertEqual(result["matches"][0]["target"]["url"], base + "other/LOG.md")
 
     def test_missing_targets_and_descendants_remain_queryable(self):
         self.write("source/LOG.md", "[gone](../gone/evidence.md)")
@@ -120,10 +120,19 @@ class LinksTest(unittest.TestCase):
         self.write("work/space name.md", "Evidence")
         self.index()
         result = query(self.db, "outgoing", BASE + "work/")
-        self.assertEqual([row["target"] for row in result["matches"]],
+        self.assertEqual([row["target"]["url"] for row in result["matches"]],
                          [BASE + "work/LOG.md", BASE + "work/space%20name.md"])
         self.assertEqual(len(query(self.db, "incoming", BASE + "work/space name.md#heading")["matches"]), 1)
         self.assertEqual(normalize_url("HTTPS://EXAMPLE.TEST/a%20b.md#x"), "https://example.test/a%20b.md")
+
+    def test_literal_percent_in_source_path_is_not_decoded_as_link_text(self):
+        self.write("literal%20name/LOG.md", "[self](#scope) [other](details.md)")
+        self.index()
+        matches = query(self.db, "outgoing", "team")["matches"]
+        self.assertEqual([m["target"]["path"] for m in matches],
+                         ["literal%20name/LOG.md", "literal%20name/details.md"])
+        self.assertEqual(matches[0]["target"]["url"], BASE + "literal%2520name/LOG.md")
+        self.assertEqual(len(query(self.db, "incoming", "team", path="literal%20name/LOG.md")["matches"]), 1)
 
     def test_partial_never_deletes_omitted_files(self):
         self.write("old/LOG.md", "[earlier](../first/LOG.md)")
@@ -270,33 +279,35 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(len(result["matches"]), 1)
         self.assertTrue(query(self.db, "search", "target", 0)["truncated"])
 
-    def test_identity_and_opaque_root_rejected(self):
+    def test_location_changes_do_not_change_identity(self):
+        self.write("source/LOG.md", "[target](../target/LOG.md)")
         self.index()
-        with self.assertRaises(ValueError):
-            self.index(base="https://example.test/different/")
+        self.index(base="https://example.test/different/")
+        result = query(self.db, "incoming", "team", path="target")
+        self.assertEqual(result["matches"][0]["target"]["url"], "https://example.test/different/target/LOG.md")
         with self.assertRaises(ValueError):
             self.index(base="https://example.test/share?token=opaque")
         with self.assertRaises(sqlite3.IntegrityError):
-            self.index(name="duplicate")
+            self.index(name="duplicate", base="https://example.test/different/")
 
     def test_cli_nested_cwd_complete_partial_status_and_forget(self):
         self.write("work/LOG.md", "Distinctive phrase [target](../target/LOG.md)")
         nested = self.scratch / "unrelated cwd"
         nested.mkdir()
-        result = self.cli("index", "team", "--root", str(self.root), "--base", BASE, "--complete", cwd=nested)
+        result = self.cli("index", "team", "--root", str(self.root), "--url-root", BASE, "--complete", cwd=nested)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "complete")
         result = self.cli("search", "Distinctive phrase", cwd=nested)
         self.assertEqual(len(json.loads(result.stdout)["matches"]), 1)
         self.assertEqual(self.cli("status").returncode, 0)
         self.assertEqual(self.cli("forget", "team").returncode, 0)
-        self.assertEqual(coverage(self.db), [])
+        self.assertEqual(coverage(self.db)[0]["mode"], "unindexed")
         self.assertEqual(self.db.execute("SELECT count(*) FROM texts").fetchone()[0], 0)
         self.assertEqual(self.db.execute("SELECT count(*) FROM links").fetchone()[0], 0)
 
     def test_cli_requires_explicit_scope_and_reports_failed_index(self):
-        self.assertEqual(self.cli("index", "team", "--root", str(self.root), "--base", BASE).returncode, 2)
-        result = self.cli("index", "team", "--root", str(self.scratch / "missing"), "--base", BASE, "--complete")
+        self.assertEqual(self.cli("index", "team", "--root", str(self.root), "--url-root", BASE).returncode, 2)
+        result = self.cli("index", "team", "--root", str(self.scratch / "missing"), "--url-root", BASE, "--complete")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "incomplete")
         self.assertEqual(self.cli("incoming", BASE, "--limit", "-1").returncode, 2)
@@ -305,7 +316,7 @@ class LinksTest(unittest.TestCase):
     def test_default_database_is_private_to_the_current_workspace(self):
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT), "index", "team", "--root", str(self.root),
-             "--base", BASE, "--complete"],
+             "--url-root", BASE, "--complete"],
             cwd=self.scratch, capture_output=True, text=True, encoding="utf-8", timeout=5,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -326,9 +337,166 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(matches[0]["state"], "finalized")
         self.assertEqual(matches[0]["path"], "2026-01-02-review/details.md")
 
+    def test_diamond_nicknames_and_source_scoped_names(self):
+        for source, body, refs in [
+            ("A", "[B](@b/LOG.md) [C](@c/LOG.md)", {"b": "B", "c": "C", "research": "E"}),
+            ("B", "[D](@research/study/LOG.md) [D again](@lab/study/LOG.md)", {"research": "D", "lab": "D"}),
+            ("C", "[D](@notes/study/LOG.md) [E](@research/study/LOG.md)", {"notes": "D", "research": "E"}),
+        ]:
+            root = self.scratch / source
+            self.write("LOG.md", body, root)
+            self.index(root, source, None)
+            with self.db:
+                set_references(self.db, source, refs)
+        result = query(self.db, "incoming", "D", path="study")
+        self.assertEqual([m["collection"] for m in result["matches"]], ["B", "B", "C"])
+        self.assertEqual([m["destination"] for m in result["matches"]],
+                         ["@research/study/LOG.md", "@lab/study/LOG.md", "@notes/study/LOG.md"])
+        self.assertTrue(all(m["target"]["status"] == "unchecked" for m in result["matches"]))
+        self.assertEqual(query(self.db, "incoming", "E")["matches"][0]["collection"], "C")
+        self.assertEqual(next(c for c in result["coverage"] if c["name"] == "D")["mode"], "unindexed")
+
+    def test_explicit_reference_never_falls_back_to_local(self):
+        self.write("LOG.md", "[remote](@unknown/target.md) [local](./@unknown/target.md)")
+        self.write("@unknown/target.md", "Local file")
+        self.index(base=None)
+        matches = query(self.db, "outgoing", "team")["matches"]
+        self.assertEqual(matches[0]["target"]["status"], "unbound")
+        self.assertIsNone(matches[0]["target"]["collection"])
+        self.assertEqual(matches[1]["target"]["status"], "cached")
+        self.assertEqual(matches[1]["target"]["collection"], "team")
+
+    def test_binding_replacement_resolves_without_rereading_and_removal_does_not_linger(self):
+        self.write("LOG.md", "[one](@research/LOG.md) [two](@lab/LOG.md)")
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"research": "D", "lab": "D"})
+        self.assertEqual(self.index(base=None)["reused"], 1)
+        with patch.object(Path, "read_text", side_effect=AssertionError("must not read files")), self.db:
+            set_references(self.db, "team", {"research": "E"})
+            self.assertEqual(query(self.db, "incoming", "D")["matches"], [])
+            self.assertEqual(len(query(self.db, "incoming", "E")["matches"]), 1)
+            self.assertEqual(query(self.db, "outgoing", "team")["matches"][1]["target"]["status"], "unbound")
+        with self.db:
+            set_references(self.db, "team", {})
+        self.assertEqual(query(self.db, "incoming", "E")["matches"], [])
+
+    def test_target_status_distinguishes_unchecked_missing_and_cached(self):
+        self.write("LOG.md", "[target](@d/study/LOG.md) [attachment](@d/data.pdf)")
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"d": "D"})
+        root = self.scratch / "D"
+        root.mkdir()
+        self.index(root, "D", None, complete=False)
+        self.assertEqual(query(self.db, "incoming", "D")["matches"][0]["target"]["status"], "unchecked")
+        self.index(root, "D", None)
+        matches = query(self.db, "incoming", "D")["matches"]
+        self.assertEqual([m["target"]["status"] for m in matches], ["missing", "unchecked"])
+        target = self.write("study/LOG.md", "Target", root)
+        self.index(root, "D", None)
+        self.assertEqual(query(self.db, "incoming", "D")["matches"][0]["target"]["status"], "cached")
+        target.write_bytes(b"bad UTF-8 \xff")
+        self.index(root, "D", None)
+        result = query(self.db, "incoming", "D")
+        self.assertEqual(result["matches"][0]["target"]["status"], "cached")
+        self.assertEqual(next(c for c in result["coverage"] if c["name"] == "D")["mode"], "incomplete")
+
+    def test_forget_retains_incoming_identity_but_clears_affected_content(self):
+        self.write("LOG.md", "[target](@d/LOG.md)")
+        self.index(base=None)
+        root = self.scratch / "D"
+        self.write("LOG.md", "Private target", root)
+        self.index(root, "D", None)
+        with self.db:
+            set_references(self.db, "team", {"d": "D"})
+            set_references(self.db, "D", {"back": "team"})
+        result = self.cli("forget", "D")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(query(self.db, "search", "Private target")["matches"], [])
+        incoming = query(self.db, "incoming", "D")
+        self.assertEqual(incoming["matches"][0]["target"]["status"], "unchecked")
+        self.assertEqual(next(c for c in incoming["coverage"] if c["name"] == "D")["references"], {})
+
+    def test_reference_paths_fragments_root_queries_and_escapes(self):
+        self.write("source/LOG.md", "[ok](@d/study/part%20one.md#finding) [bad](@d/../escape.md) [local bad](../../escape.md)")
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"d": "D"})
+        matches = query(self.db, "outgoing", "team")["matches"]
+        self.assertEqual(matches[0]["target"]["path"], "study/part one.md")
+        self.assertEqual(matches[0]["destination"], "@d/study/part%20one.md#finding")
+        self.assertEqual([m["target"]["status"] for m in matches[1:]], ["invalid", "invalid"])
+        self.assertEqual(len(query(self.db, "incoming", "D", path="study/part one.md")["matches"]), 1)
+        self.assertEqual(query(self.db, "incoming", "D", path="stud")["matches"], [])
+        self.assertTrue(query(self.db, "incoming", "D", limit=0)["truncated"])
+
+    def test_copy_uses_destination_collection_bindings(self):
+        self.write("LOG.md", "[target](@research/LOG.md)")
+        self.index(name="B", base=None)
+        self.index(name="C", base=None)
+        with self.db:
+            set_references(self.db, "B", {"research": "D"})
+            set_references(self.db, "C", {"research": "E"})
+        self.assertEqual(query(self.db, "incoming", "D")["matches"][0]["collection"], "B")
+        self.assertEqual(query(self.db, "incoming", "E")["matches"][0]["collection"], "C")
+
+    def test_url_and_named_references_converge_when_url_root_is_known(self):
+        self.write("LOG.md", "[named](@d/study/LOG.md) [url](https://example.test/D/study/LOG.md)")
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"d": "D"})
+        self.assertEqual(len(query(self.db, "incoming", "D")["matches"]), 1)
+        root = self.scratch / "D"
+        self.write("study/LOG.md", "Target", root)
+        self.index(root, "D", "https://example.test/D/")
+        self.assertEqual(len(query(self.db, "incoming", "D")["matches"]), 2)
+        self.assertEqual(len(query(self.db, "incoming", "https://example.test/D/study")["matches"]), 2)
+        self.index(root, "D", "https://example.test/moved/")
+        result = query(self.db, "incoming", "D")
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["target"]["url"], "https://example.test/moved/study/LOG.md")
+        self.assertEqual(len(query(self.db, "incoming", "https://example.test/D/study")["matches"]), 1)
+
+    def test_cycles_need_no_recursive_resolution(self):
+        self.write("LOG.md", "[back](@self/LOG.md)")
+        self.index(base=None)
+        with self.db:
+            set_references(self.db, "team", {"self": "team"})
+        self.assertEqual(len(query(self.db, "incoming", "team")["matches"]), 1)
+
+    def test_cli_binding_replacement_clear_and_query_arguments(self):
+        self.write("LOG.md", "[target](@research/study/LOG.md)")
+        self.assertEqual(self.cli("index", "B", "--root", str(self.root), "--complete").returncode, 0)
+        result = self.cli("set-references", "B", "--reference", "research=D", "--reference", "lab=D")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli("incoming", "D", "study/")
+        self.assertEqual(json.loads(result.stdout)["matches"][0]["destination"], "@research/study/LOG.md")
+        self.assertEqual(self.cli("set-references", "B").returncode, 2)
+        self.assertEqual(self.cli("set-references", "B", "--reference", "bad").returncode, 2)
+        self.assertEqual(self.cli("set-references", "B", "--reference", "x=D", "--reference", "x=E").returncode, 2)
+        self.assertEqual(self.cli("set-references", "B", "--reference", "bad/name=D").returncode, 2)
+        self.assertEqual(self.cli("set-references", "B", "--reference", "x=invalid/key").returncode, 2)
+        self.assertEqual(len(query(self.db, "incoming", "D")["matches"]), 1)
+        self.assertEqual(self.cli("set-references", "B", "--clear").returncode, 0)
+        self.assertEqual(query(self.db, "incoming", "D")["matches"], [])
+        self.assertEqual(self.cli("incoming", "https://example.test/", "extra").returncode, 2)
+
+    def test_old_cache_requires_explicit_rebuild(self):
+        old = self.scratch / "old.sqlite"
+        with sqlite3.connect(old) as db:
+            db.execute("CREATE TABLE collections (name TEXT)")
+            db.execute("INSERT INTO collections VALUES ('retained')")
+        db.close()
+        with self.assertRaisesRegex(ValueError, "rebuild"):
+            database(old)
+        with sqlite3.connect(old) as db:
+            self.assertEqual(db.execute("SELECT name FROM collections").fetchone()[0], "retained")
+        db.close()
+
     def test_unknown_freshness_is_not_invented(self):
         with self.db:
-            index_collection(self.db, "team", self.root, BASE, True)
+            index_collection(self.db, "team", self.root, True, url_root=BASE)
         row = coverage(self.db)[0]
         self.assertEqual(row["snapshot"], "unknown")
         self.assertEqual(row["complete_snapshot"], "unknown")
@@ -346,7 +514,7 @@ class PackageTest(unittest.TestCase):
 
     def test_package_document_links_resolve(self):
         root = SCRIPT.parents[3]
-        for source in (root / "README.md", SCRIPT.parents[1] / "SKILL.md", SCRIPT.parents[1] / "SETUP.md"):
+        for source in (root / "README.md", SCRIPT.parents[1] / "SKILL.md", SCRIPT.parents[1] / "SETUP.md", SCRIPT.parents[1] / "INDEX.md"):
             for link in parse_markdown(source.read_text(encoding="utf-8"), source):
                 target = urlsplit(link.destination)
                 if not target.scheme and not target.netloc:

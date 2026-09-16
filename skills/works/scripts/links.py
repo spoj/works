@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import sqlite3
 import sys
@@ -14,6 +15,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 
 _DEFINITION = re.compile(r" {0,3}\[([^]\n]+)\]:[ \t]*(.*)$")
 _URL = re.compile(r"(?:https?|file)://[^\s<>\"'`]+")
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,25 +166,33 @@ def database(path: str | Path) -> sqlite3.Connection:
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
+    if (db.execute("SELECT 1 FROM sqlite_master WHERE name = 'collections'").fetchone()
+            and db.execute("PRAGMA user_version").fetchone()[0] != 1):
+        db.close()
+        raise ValueError("index schema changed; rebuild this disposable cache in a new database")
     db.executescript("""
+        PRAGMA user_version = 1;
         CREATE TABLE IF NOT EXISTS collections (
-            name TEXT PRIMARY KEY, base TEXT UNIQUE NOT NULL,
+            name TEXT PRIMARY KEY, url_root TEXT UNIQUE,
             attempted TEXT, complete TEXT, snapshot TEXT, complete_snapshot TEXT,
-            mode TEXT NOT NULL DEFAULT 'partial', errors TEXT NOT NULL DEFAULT '[]'
+            mode TEXT NOT NULL DEFAULT 'unindexed', errors TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS refs (
+            source TEXT NOT NULL REFERENCES collections(name),
+            alias TEXT NOT NULL, target TEXT NOT NULL REFERENCES collections(name),
+            PRIMARY KEY(source, alias)
         );
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY,
-            collection TEXT NOT NULL REFERENCES collections(name) ON DELETE CASCADE,
-            path TEXT NOT NULL, url TEXT NOT NULL,
+            collection TEXT NOT NULL REFERENCES collections(name), path TEXT NOT NULL,
             mtime_ns INTEGER NOT NULL, size INTEGER NOT NULL, indexed TEXT NOT NULL,
             UNIQUE(collection, path)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS texts USING fts5(body);
         CREATE TABLE IF NOT EXISTS links (
             source INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-            line INTEGER NOT NULL, destination TEXT NOT NULL, target TEXT NOT NULL
+            line INTEGER NOT NULL, destination TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS links_target ON links(target);
         CREATE TRIGGER IF NOT EXISTS delete_text AFTER DELETE ON files BEGIN
             DELETE FROM texts WHERE rowid = old.id;
         END;
@@ -190,19 +200,32 @@ def database(path: str | Path) -> sqlite3.Connection:
     return db
 
 
-def index_collection(db: sqlite3.Connection, name: str, root: Path, base: str,
-                     complete: bool, snapshot: str = "unknown", force: bool = False) -> dict:
-    parsed = urlsplit(base)
-    if parsed.scheme not in ("http", "https", "file") or parsed.query or parsed.fragment:
-        raise ValueError("base must be a directory http(s) or file URL without a query or fragment")
-    base = normalize_url(base).rstrip("/") + "/"
-    previous = db.execute("SELECT base, errors FROM collections WHERE name = ?", (name,)).fetchone()
-    if previous and previous["base"] != base:
-        raise ValueError("collection identity changed; forget it explicitly before reusing the name")
-    db.execute("INSERT INTO collections(name, base) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", (name, base))
+def set_references(db: sqlite3.Connection, source: str, refs: dict[str, str]) -> None:
+    for name in [source, *refs, *refs.values()]:
+        if not _NAME.fullmatch(name):
+            raise ValueError(f"invalid collection key or reference name: {name}")
+    db.executemany("INSERT INTO collections(name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+                   [(name,) for name in {source, *refs.values()}])
+    db.execute("DELETE FROM refs WHERE source = ?", (source,))
+    db.executemany("INSERT INTO refs(source, alias, target) VALUES (?, ?, ?)",
+                   [(source, alias, target) for alias, target in refs.items()])
+
+
+def index_collection(db: sqlite3.Connection, name: str, root: Path, complete: bool,
+                     snapshot: str = "unknown", force: bool = False, url_root: str | None = None) -> dict:
+    if not _NAME.fullmatch(name):
+        raise ValueError(f"invalid collection key: {name}")
+    if url_root is not None:
+        parsed = urlsplit(url_root)
+        if parsed.scheme not in ("http", "https", "file") or parsed.query or parsed.fragment:
+            raise ValueError("URL root must be a directory http(s) or file URL without a query or fragment")
+        url_root = normalize_url(url_root).rstrip("/") + "/"
+    db.execute("INSERT INTO collections(name) VALUES (?) ON CONFLICT(name) DO NOTHING", (name,))
+    previous = db.execute("SELECT errors FROM collections WHERE name = ?", (name,)).fetchone()
+    db.execute("UPDATE collections SET url_root = ? WHERE name = ?", (url_root, name))
     root = root.expanduser().resolve()
     now = datetime.now(timezone.utc).isoformat()
-    prior_errors = json.loads(previous["errors"]) if previous else []
+    prior_errors = json.loads(previous["errors"])
     failed_paths = {error["path"] for error in prior_errors}
     errors = [] if complete else prior_errors
     seen = set()
@@ -240,9 +263,7 @@ def index_collection(db: sqlite3.Connection, name: str, root: Path, base: str,
                     errors = [error for error in errors if error["path"] != relative]
                     continue
                 body = path.read_text(encoding="utf-8-sig")
-                url = normalize_url(urljoin(base, quote(relative, safe="/")))
-                links = [(link.line, link.destination, normalize_url(urljoin(url, link.destination)))
-                         for link in parse_markdown(body, relative)]
+                links = [(link.line, link.destination) for link in parse_markdown(body, relative)]
             except (OSError, UnicodeError, ValueError) as error:
                 errors = [item for item in errors if item["path"] != relative]
                 errors.append({"path": relative, "error": str(error)})
@@ -250,11 +271,11 @@ def index_collection(db: sqlite3.Connection, name: str, root: Path, base: str,
             errors = [error for error in errors if error["path"] != relative]
             db.execute("DELETE FROM files WHERE collection = ? AND path = ?", (name, relative))
             row = db.execute(
-                "INSERT INTO files(collection, path, url, mtime_ns, size, indexed) VALUES (?, ?, ?, ?, ?, ?)",
-                (name, relative, url, stat.st_mtime_ns, stat.st_size, now),
+                "INSERT INTO files(collection, path, mtime_ns, size, indexed) VALUES (?, ?, ?, ?, ?)",
+                (name, relative, stat.st_mtime_ns, stat.st_size, now),
             ).lastrowid
             db.execute("INSERT INTO texts(rowid, body) VALUES (?, ?)", (row, body))
-            db.executemany("INSERT INTO links(source, line, destination, target) VALUES (?, ?, ?, ?)",
+            db.executemany("INSERT INTO links(source, line, destination) VALUES (?, ?, ?)",
                            [(row, *link) for link in links])
             changed += 1
     if complete and not errors:
@@ -279,38 +300,107 @@ def coverage(db: sqlite3.Connection) -> list[dict]:
         LEFT JOIN files ON files.collection = collections.name
         GROUP BY collections.name ORDER BY collections.name
     """)
-    return [dict(row) | {"errors": json.loads(row["errors"])} for row in rows]
+    return [dict(row) | {"errors": json.loads(row["errors"]), "references": dict(db.execute(
+        "SELECT alias, target FROM refs WHERE source = ? ORDER BY alias", (row["name"],),
+    ))} for row in rows]
 
 
-def query(db: sqlite3.Connection, command: str, value: str, limit: int = 50) -> dict:
+def collection_path(value: str) -> str:
+    path = posixpath.normpath(value)
+    if path == ".." or path.startswith(("../", "/")) or "\\" in path:
+        raise ValueError("reference path must stay inside its collection")
+    return "" if path == "." else path
+
+
+def contains(parent: str, child: str) -> bool:
+    return not parent or child == parent.rstrip("/") or child.startswith(parent.rstrip("/") + "/")
+
+
+def resolve_reference(collection: str, source: str, destination: str, collections: dict) -> dict:
+    parsed = urlsplit(destination)
+    target = {"collection": None, "path": None, "url": None, "status": "unchecked"}
+    if destination.startswith("@"):
+        alias, _, path = parsed.path[1:].partition("/")
+        if not _NAME.fullmatch(alias):
+            raise ValueError("invalid reference name")
+        target["path"] = collection_path(unquote(path))
+        target["collection"] = collections[collection]["references"].get(alias)
+        if target["collection"] is None:
+            target["status"] = "unbound"
+    elif parsed.scheme or parsed.netloc:
+        target["url"] = normalize_url(destination)
+        for other in sorted(collections.values(), key=lambda c: len(c["url_root"] or ""), reverse=True):
+            if other["url_root"] and contains(other["url_root"], target["url"]):
+                target["collection"] = other["name"]
+                target["path"] = collection_path(unquote(urlsplit(target["url"]).path[len(urlsplit(other["url_root"]).path):]))
+                break
+    else:
+        target["collection"] = collection
+        target["path"] = collection_path(posixpath.join(posixpath.dirname(source), unquote(parsed.path)) if parsed.path else source)
+    if target["collection"] is not None and target["url"] is None:
+        url_root = collections[target["collection"]]["url_root"]
+        if url_root:
+            target["url"] = normalize_url(urljoin(url_root, quote(target["path"], safe="/")))
+    return target
+
+
+def query(db: sqlite3.Connection, command: str, value: str, limit: int = 50, path: str = "") -> dict:
+    report = coverage(db)
+    collections = {c["name"]: c for c in report}
     if command == "search":
         phrase = '"' + value.replace('"', '""') + '"'
-        rows = db.execute("""
-            SELECT files.collection, files.path, files.url, files.indexed,
+        rows = [dict(row) for row in db.execute("""
+            SELECT files.collection, files.path, files.indexed,
                 snippet(texts, 0, '[', ']', ' ... ', 32) AS excerpt
             FROM texts JOIN files ON files.id = texts.rowid
-            WHERE texts MATCH ? ORDER BY rank, files.url LIMIT ?
-        """, (phrase, limit + 1)).fetchall()
+            WHERE texts MATCH ? ORDER BY rank, files.collection, files.path LIMIT ?
+        """, (phrase, limit + 1))]
     else:
-        if urlsplit(value).scheme not in ("http", "https", "file"):
-            raise ValueError("incoming/outgoing requires a canonical http(s) or file URL")
-        target = normalize_url(value).rstrip("/")
-        column = "links.target" if command == "incoming" else "files.url"
-        rows = db.execute(f"""
-            SELECT files.collection, files.path, files.url, files.indexed,
-                links.line, links.destination, links.target
+        if urlsplit(value).scheme in ("http", "https", "file"):
+            if path:
+                raise ValueError("supply either a collection and path or a URL")
+            requested = resolve_reference("", "", value, collections)
+        else:
+            if value not in collections:
+                raise ValueError(f"unknown collection key: {value}")
+            requested = {"collection": value, "path": collection_path(path)}
+        cached = {(row[0], row[1]) for row in db.execute("SELECT collection, path FROM files")}
+        rows = []
+        for row in db.execute("""
+            SELECT files.collection, files.path, files.indexed, links.line, links.destination
             FROM links JOIN files ON files.id = links.source
-            WHERE {column} = ? OR instr({column}, ?) = 1
-            ORDER BY files.collection, files.path, links.line LIMIT ?
-        """, (target, target + "/", limit + 1)).fetchall()
-    matches = []
-    for row in rows[:limit]:
-        item = dict(row)
+            ORDER BY files.collection, files.path, links.line
+        """):
+            item = dict(row)
+            try:
+                target = resolve_reference(item["collection"], item["path"], item["destination"], collections)
+            except ValueError as error:
+                target = {"collection": None, "path": None, "url": None, "status": "invalid", "error": str(error)}
+            source = resolve_reference(item["collection"], item["path"], "", collections)
+            candidate = target if command == "incoming" else source
+            if requested["collection"] is not None:
+                match = (candidate["collection"] == requested["collection"]
+                         and contains(requested["path"], candidate["path"]))
+            else:
+                match = candidate["url"] is not None and contains(requested["url"], candidate["url"])
+            if not match:
+                continue
+            if target["collection"] is not None:
+                if (target["collection"], target["path"]) in cached:
+                    target["status"] = "cached"
+                elif (collections[target["collection"]]["mode"] == "complete"
+                      and target["path"].lower().endswith(".md")):
+                    target["status"] = "missing"
+            item["target"] = target
+            rows.append(item)
+            if len(rows) > limit:
+                break
+    for item in rows[:limit]:
+        item["url"] = resolve_reference(item["collection"], item["path"], "", collections)["url"]
         folder = item["path"].split("/", 1)[0]
         item["state"] = ("wip" if folder.startswith("_wip_") else "finalized"
                          if re.fullmatch(r"\d{4}-\d{2}-\d{2}-.+", folder) else "collection")
-        matches.append(item)
-    return {"coverage": coverage(db), "matches": matches, "truncated": len(rows) > limit}
+    return {"coverage": report, "matches": rows[:limit], "truncated": len(rows) > limit}
 
 
 def _limit(value: str) -> int:
@@ -321,42 +411,84 @@ def _limit(value: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Index supplied Markdown trees; no network or permission checks.")
-    parser.add_argument("--db", type=Path, default=Path(".works/index.sqlite"))
+    parser = argparse.ArgumentParser(
+        description="Index local Markdown snapshots and resolve collection-scoped citations. No network access.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''Examples (collection keys are private to this index):
+  links.py index B --root ./snapshot-B --complete
+  links.py set-references B --reference research=D --reference lab=D
+  links.py set-references C --reference notes=D
+  links.py incoming D 2026-01-01-study/     # find B and C citations, even before indexing D
+  links.py outgoing B                     # inspect targets, including unbound names
+  links.py search "shipment size" --limit 5
+  links.py set-references B --clear       # remove all B's reference names
+
+@research/path inside B uses B's declarations, not the reader's names.
+Indexing files does not change these bindings. Read README declarations yourself;
+set-references replaces the whole source mapping. No graph walking is performed.''')
+    parser.add_argument("--db", type=Path, default=Path(".works/index.sqlite"),
+                        help="private SQLite cache (default: .works/index.sqlite)")
     commands = parser.add_subparsers(dest="command", required=True)
     index = commands.add_parser("index", help="index a full snapshot or a partial update tree")
-    index.add_argument("collection")
-    index.add_argument("--root", type=Path, required=True, help="readable tree, with collection-relative paths")
-    index.add_argument("--base", required=True, help="canonical directory URL, not a download location")
+    index.add_argument("collection", metavar="COLLECTION", help="logical collection key in this private index")
+    index.add_argument("--root", type=Path, required=True, metavar="DIRECTORY",
+                       help="readable local tree or snapshot; preserve collection-relative paths")
+    index.add_argument("--url-root", metavar="URL",
+                       help="optional URL prefix for ordinary hyperlinks; omission removes URL mapping")
     mode = index.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--complete", action="store_true", help="assert full collection inventory")
+    mode.add_argument("--complete", action="store_true", help="full Markdown inventory; remove missing files only after success")
     mode.add_argument("--partial", action="store_true", help="upsert only; omitted files are not deleted")
     index.add_argument("--snapshot", default="unknown", help="source revision or capture time, when established")
     index.add_argument("--force", action="store_true", help="reread files even if size and mtime match")
-    commands.add_parser("status", help="report known coverage; compare with the private follow list")
-    forget = commands.add_parser("forget", help="remove a collection's cached text and links")
+    commands.add_parser("status", help="report coverage and bindings; compare with private follows")
+    references = commands.add_parser("set-references", help="replace ALL reference names for one source collection",
+                                    description="Replace this source's complete name-to-collection mapping; no file reads.")
+    references.add_argument("collection", metavar="SOURCE_COLLECTION")
+    reference_mode = references.add_mutually_exclusive_group(required=True)
+    reference_mode.add_argument("--reference", action="append", default=[], metavar="NAME=COLLECTION",
+                                help="a name used as @NAME/path in this source; repeat for all names, including nicknames")
+    reference_mode.add_argument("--clear", action="store_true", help="explicitly remove every binding for this source")
+    forget = commands.add_parser("forget", help="clear cached content, retaining identity and incoming references")
     forget.add_argument("collection")
     for command in ("incoming", "outgoing", "search"):
-        sub = commands.add_parser(command)
-        sub.add_argument("value", help="canonical file/work URL, or a search phrase")
-        sub.add_argument("--limit", type=_limit, default=50)
+        sub = commands.add_parser(command, help={"incoming": "find citations to a collection, work or file",
+                                                 "outgoing": "inspect citations from a collection, work or file",
+                                                 "search": "phrase search across all indexed Markdown"}[command])
+        sub.add_argument("value", metavar="PHRASE" if command == "search" else "COLLECTION_OR_URL")
+        if command != "search":
+            sub.add_argument("path", nargs="?", default="", metavar="PATH",
+                             help="literal collection-relative file or directory, not a URL; omitted means the whole collection")
+        sub.add_argument("--limit", type=_limit, default=50, metavar="COUNT",
+                         help="maximum matches (default: 50); output reports truncation")
     args = parser.parse_args(argv)
-    if args.command != "index" and not args.db.is_file():
+    refs = {}
+    for entry in getattr(args, "reference", []):
+        alias, separator, target = entry.partition("=")
+        if not separator or alias in refs:
+            parser.error("each --reference must be a unique NAME=COLLECTION binding")
+        refs[alias] = target
+    if args.command not in ("index", "set-references") and not args.db.is_file():
         parser.error("index does not exist; compare unindexed collections with the follow list")
     try:
         with database(args.db) as db:
             if args.command == "index":
-                result = index_collection(db, args.collection, args.root, args.base,
-                                          args.complete, args.snapshot, args.force)
+                result = index_collection(db, args.collection, args.root, args.complete,
+                                          args.snapshot, args.force, args.url_root)
                 result["coverage"] = coverage(db)
                 status = int(bool(result["errors"]))
+            elif args.command == "set-references":
+                set_references(db, args.collection, refs)
+                result, status = {"coverage": coverage(db)}, 0
             elif args.command == "forget":
-                db.execute("DELETE FROM collections WHERE name = ?", (args.collection,))
+                db.execute("DELETE FROM files WHERE collection = ?", (args.collection,))
+                db.execute("DELETE FROM refs WHERE source = ?", (args.collection,))
+                db.execute("""UPDATE collections SET attempted = NULL, complete = NULL, snapshot = NULL,
+                    complete_snapshot = NULL, mode = 'unindexed', errors = '[]' WHERE name = ?""", (args.collection,))
                 result, status = {"coverage": coverage(db)}, 0
             elif args.command == "status":
                 result, status = {"coverage": coverage(db)}, 0
             else:
-                result, status = query(db, args.command, args.value, args.limit), 0
+                result, status = query(db, args.command, args.value, args.limit, getattr(args, "path", "")), 0
         print(json.dumps(result, indent=2))
         return status
     except (OSError, ValueError, sqlite3.Error) as error:
