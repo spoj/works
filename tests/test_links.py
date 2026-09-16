@@ -311,7 +311,7 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.scratch / ".works" / "index.sqlite").is_file())
 
-    def test_wip_references_are_labelled_and_reclassified_on_promotion(self):
+    def test_wip_references_are_labelled_and_reclassified_on_finalization(self):
         self.write("2026-01-01-study/LOG.md", "Finished finding")
         self.write("_wip_review/details.md", "Draft correction [study](../2026-01-01-study/LOG.md)")
         self.write("README.md", "Collection guide")
@@ -323,7 +323,7 @@ class LinksTest(unittest.TestCase):
         self.index()
         matches = query(self.db, "incoming", BASE + "2026-01-01-study")["matches"]
         self.assertEqual(len(matches), 1)
-        self.assertEqual(matches[0]["state"], "completed")
+        self.assertEqual(matches[0]["state"], "finalized")
         self.assertEqual(matches[0]["path"], "2026-01-02-review/details.md")
 
     def test_unknown_freshness_is_not_invented(self):

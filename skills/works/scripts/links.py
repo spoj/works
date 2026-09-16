@@ -307,7 +307,7 @@ def query(db: sqlite3.Connection, command: str, value: str, limit: int = 50) -> 
     for row in rows[:limit]:
         item = dict(row)
         folder = item["path"].split("/", 1)[0]
-        item["state"] = ("wip" if folder.startswith("_wip_") else "completed"
+        item["state"] = ("wip" if folder.startswith("_wip_") else "finalized"
                          if re.fullmatch(r"\d{4}-\d{2}-\d{2}-.+", folder) else "collection")
         matches.append(item)
     return {"coverage": coverage(db), "matches": matches, "truncated": len(rows) > limit}
