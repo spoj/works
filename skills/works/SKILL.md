@@ -5,9 +5,7 @@ description: Retain, find, cite, finalize and adapt dated contributions in colle
 
 # Works
 
-A collection is a growing list of dated works whose evidence serves as documentation across time and people. Preserve contributions; later findings build on or correct them through new works and citations.
-
-Works applies independently of how the folders are stored or shared. The agent must understand the surrounding access, visibility and authorization sufficiently to apply it appropriately.
+A collection holds dated contributions. Preserve evidence and connections for later reuse, qualification and correction.
 
 ## Layout
 
@@ -16,36 +14,38 @@ Use the chosen collection folder directly, including a repository root:
 ```text
 README.md
 AGENTS.md                  # optional, user-owned
-_wip_some-question/LOG.md   # created on demand
+_wip_some-question/LOG.md
 YYYY-MM-DD-some-finding/LOG.md
 ```
 
-Read README for owner, audience (intended readers), locations and contribution rules. Respect AGENTS; updates must not overwrite local policy. For setup or migration, read [SETUP.md](SETUP.md).
+Read README for owner, audience, locations and contribution rules. Respect user-owned AGENTS. For setup or migration, read [SETUP.md](SETUP.md).
 
-Use relative paths locally and `[label](@name/path)` across collections. README prose identifies referenced collections and nicknames; names belong to the citing collection. These are agent-resolved references, not browser links.
+Use relative links locally and `[label](@name/path)` across collections. Names come from the citing collection's README, not Git remotes. Say why each citation matters.
 
-**WIP** holds ongoing investigation, calculations, scripts, evidence and preparation of business outputs. A **draft** is an unfinished artifact within it. Keep code, evidence and source receipts together. WIPs are not stable citations; review them without automatically deleting them.
+A **WIP** holds investigation, calculations, scripts, evidence and output preparation—not just drafts. Create on demand; keep related materials together. WIPs are unfinished references; review without automatically deleting them.
 
 ## Finalize
 
-A **work** is a finalized, dated, citable contribution. Useful negative results and inconclusive checkpoints qualify; finalized does not mean correct or conclusive.
+A **work** is a finalized, citable contribution, not necessarily correct or conclusive. Useful negative results and inconclusive checkpoints qualify.
 
-Exercise editorial judgment: decide what is worth retaining and for whom. Write `LOG.md` as a synthesis of the question, finding, significance, reasoning, evidence, scope and uncertainty—not an activity log. Link lengthy support. Distinguish observations from interpretations and retain material counterevidence.
+Write `LOG.md` as a synthesis of question, finding, significance, reasoning, evidence, scope and uncertainty—not an activity log. Separate observations from interpretations; retain material counterevidence. Link lengthy support. Enable understanding, reuse and correction, not exhaustive reproduction.
 
-Check content and links, then rename to `YYYY-MM-DD-slug/` and resolve WIP-path references. Renaming is the last step, not the substance. Never overwrite a work.
+A work may record an external change, such as launching a project or intake folder: capture date, intention, owner and stable location. The live system owns its evolving state; do not mirror it routinely.
 
-The folder date records this edition's finalization. State applicable evidence and analysis dates in `LOG.md`. Unchanged copies retain their date; a new shared edition does not make old evidence new.
+Check content and links, then rename to `YYYY-MM-DD-slug/` and fix WIP-path references. The date records finalization; state evidence and analysis dates. Unchanged copies retain their date.
 
-Preserve works and addresses. Changed claims, evidence, reasoning or material caveats require a new work citing the earlier one. Meaning-preserving fixes and brief dated sharing notes may be added in place; preserve original evidence bytes.
+Preserve works and addresses. Meaning-preserving edits, including navigation citations, may be made in place without post-note labels. Material changes to findings, methods, reasoning, evidential basis or caveats require a new work. Cite the affected work beside the changed claim and state what changes. Preserve original evidence bytes.
 
 ## Read and reuse
 
-Read `LOG.md`, supporting evidence, earlier foundations and later citations or corrections across followed collections. Citations may disagree or repeat a source; recency and citation counts do not prove truth. WIP references remain unfinished.
+Find and read Markdown with ordinary tools. **Before relying on a work, run `citations.py in COLLECTION WORK` and inspect all incoming citations. Do not filter citations.** Read relevant citing sources for qualifications and corrections. See [INDEX.md](INDEX.md) for commands; scan all collection Markdown, including support and WIPs. Report coverage, freshness and access gaps: no indexed citation does not prove no correction.
 
-When copying or adapting a work for other readers, review its contents, supporting files and citations. Copy unchanged only when these remain appropriate; otherwise finalize a self-contained **shared edition** without changing the original. Readers need access to its evidence. Reconcile reference names with the destination README and verify the resulting files and links through the destination's read route.
+Follow evidence and foundations to the depth the task requires. Recency, finalization and citation counts do not prove truth. Recheck changing facts before consequential use.
 
-Recheck changing facts before consequential use. Report coverage, freshness and access gaps; “not found” does not mean “absent.” For the private index, read [INDEX.md](INDEX.md). Index all collection Markdown, not just logs; the cache is disposable, not evidence.
+Cite unchanged foundations rather than copying them. Include enough current context to do the task. Consolidate when actual work reveals costly fragmentation or conflict—not on a schedule or for hypothetical future needs.
 
-## Operating context
+For another audience, review contents, evidence and citations. Copy unchanged only when appropriate; otherwise finalize a self-contained shared edition. Preserve the original. Readers need evidence access. Reconcile collection names and verify files and links through the destination's read route.
 
-Check actual storage permissions and task authorization before writing or copying; reading does not authorize redistribution. If uncertain, ask rather than probe by writing. WIP names and README text do not set storage permissions. Keep personal follows, caches and machine-specific details in suitably private storage; never expose live credentials or access-token-bearing URLs. Use existing provider procedures and applicable retention rules. Do not broaden permissions to repair citations or push Git without authorization.
+## Access
+
+Check actual storage permissions and task authorization before writing or copying; reading does not authorize redistribution. Ask when uncertain; do not probe by writing. README prose does not grant permissions. Keep personal follows, caches and machine-specific details private; never expose live credentials or token-bearing URLs. Use existing provider procedures and retention rules. Do not broaden permissions or push Git without authorization.

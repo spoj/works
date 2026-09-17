@@ -1,6 +1,6 @@
 # Works
 
-A growing list of dated contributions, connected by ordinary citations. Prior works and their evidence serve as documentation across time and people. Preserve them; later findings build on or correct them through new works, not revisions of the past.
+A growing list of dated contributions, connected by ordinary citations. Prior works and their evidence serve as documentation across time and people. Preserve them; material changes belong in new works citing the affected findings. Meaning-preserving edits, including navigation citations, may be made in place.
 
 Works applies independently of how these folders are stored or shared. The agent must understand the surrounding access, visibility and authorization sufficiently to apply it appropriately; Works defines no sharing workflow or permission model.
 
@@ -37,7 +37,9 @@ YYYY-MM-DD-some-finding/LOG.md
 - **Finalize** through editorial review of claims, evidence, scope, uncertainty and links; only then rename the WIP to a dated folder. A **work** is the retained, dated, citable contribution. Finalized does not mean correct or conclusive.
 - The folder date records when that edition was finalized. `LOG.md` states the dates or periods to which its evidence and analysis apply. An unchanged copy retains its date; a new shared edition does not make old evidence new.
 - When adapting a work for other readers, retain a self-contained **shared edition** without changing the original. Review supporting evidence and preserve what references mean in the destination context.
-- Preserve works and their addresses. Substantive corrections belong in new works citing them. Meaning-preserving fixes and brief dated sharing notes may be added in place.
+- Preserve works and their addresses. Material changes belong in new works citing the affected claim. Navigation links need no special post-note label when they preserve meaning.
+- Reuse unchanged foundations through citations. Consolidate when actual work exposes costly fragmentation or conflict, not on a schedule.
+- A work can record the launch of an external project or intake folder: capture its date, purpose, owner and stable location. Read the live system for evolving state rather than routinely mirroring it.
 
 Check actual storage permissions and task authorization before writing or copying. WIP names and README text do not set storage permissions. Keep personal follows, caches and machine-specific details in suitably private storage; provider-specific procedures belong in local instructions.
 
@@ -51,20 +53,31 @@ Check actual storage permissions and task authorization before writing or copyin
 
 Keep general guidance in the skill rather than copying it into local files. Changes requiring local migration should be proposed separately.
 
-## References and private index
+## References and private citation lookup
 
-Use ordinary relative links locally and `[label](@name/path)` across collections. Each collection's README identifies its referenced collections and nicknames in prose. Names belong to the citing collection; personal follows and machine-specific access details stay in local instructions. Copying a work must preserve what its names identify in the destination context. Named references are agent-resolved, not browser-clickable links.
+Use ordinary relative links locally and `[label](@name/path)` across collections. Each collection's README identifies its referenced collections and nicknames in prose. Names belong to the citing collection, not Git remotes. Personal follows and machine-specific access details stay private. Copying a work must preserve what its names identify in the destination context. Named references are agent-resolved, not browser-clickable links.
 
-The agent supplies local snapshots and source-scoped bindings to [links.py](skills/works/scripts/links.py); it neither reads provider services nor interprets declarations or walks the graph. `set-references B --reference research=D --reference lab=D` replaces B's complete mapping. C may use another name for D. `incoming D` finds both sources, even before D is indexed. Run `--help` for examples or read [INDEX.md](skills/works/INDEX.md).
+Find and read Markdown with ordinary tools. **Before relying on a work, inspect all indexed incoming cross-work citations. Do not filter citations.** A later contradiction must remain visible even if it has no incoming citations or matching search terms of its own.
 
-The script indexes **all collection Markdown**, including supporting files and WIPs. Query states `wip`, `finalized` and `collection` are path-based labels, not proof of review. Target status distinguishes cached, missing, unchecked, unbound and invalid references. URL roots are optional; logical identity is independent of provider paths.
-
-Complete inventories and partial updates are explicit. “Complete” describes index coverage, not finalization. Failed reads retain earlier cached material with warnings; only a successful complete inventory removes missing files. Queries report coverage, freshness and truncation. Supplement extracted links with full-text searches and source review; the cache cannot prove truth, current permissions or absence of corrections elsewhere.
-
-The method works without Python. The optional indexer requires Python 3.12+ with SQLite FTS5 and no third-party dependencies. Choose the Python invocation for the local environment. From this repository root:
+The agent supplies readable snapshots and source-scoped bindings to [citations.py](skills/works/scripts/citations.py). It does not fetch, search, rank, traverse the graph or publish anything. From this repository root:
 
 ```bash
-python -B tests/test_links.py
+python skills/works/scripts/citations.py references add local research team
+python skills/works/scripts/citations.py scan local --root ./local-snapshot --complete --snapshot 'capture time or revision'
+python skills/works/scripts/citations.py in local 2026-01-01-study/
+python skills/works/scripts/citations.py out local 2026-01-01-study/
+python skills/works/scripts/citations.py resolve --from local '@research/2026-01-01-study/LOG.md'
+python skills/works/scripts/citations.py coverage
+```
+
+`in` groups every incoming occurrence by citing work and source filename, with line numbers and full citing paragraphs/list items. `out` lists distinct cited works and destination paths. Within-work navigation is separate from cross-work citations. There are no result limits, context clipping or ranking adjustments. Default output is text; `--json` returns structured records. Run `--help` or read [INDEX.md](skills/works/INDEX.md).
+
+Scan **all collection Markdown**, including supporting files and WIPs. Complete inventories and partial updates are explicit. Failed reads retain earlier citation context with warnings; only a successful complete scan removes missing files. Every query reports coverage and snapshot dates. Compare coverage with private follows: the cache cannot prove truth, current access or absence of unlinked/unavailable corrections. If a shell truncates output, save it and read the remainder.
+
+The tool requires Python 3.12+ with SQLite and no third-party dependencies. Schema 2 requires rebuilding older caches from readable snapshots; source works and evidence do not change. Test from the repository root:
+
+```bash
+python -B -m unittest discover -s tests -v
 ```
 
 Tests use temporary directories, not real collections or remote services.

@@ -41,9 +41,9 @@ WIPs are not stable citations.
 Finalize through editorial review, then rename to `YYYY-MM-DD-slug/`.
 The folder date records finalization; `LOG.md` states the finding, evidence,
 applicable dates and uncertainty. Finalized does not mean validated.
-Preserve works; substantive corrections belong in new works citing them.
-Meaning-preserving fixes and brief dated sharing notes may be added in place.
-Review WIPs without automatically deleting them.
+Preserve works; material changes belong in new works citing the affected finding.
+Meaning-preserving edits, including navigation citations, may be made in place.
+Review WIPs without automatically deleting them; consolidate only when needed.
 ```
 
 Replace placeholders; omit irrelevant fields. Identify referenced collections and their nicknames in ordinary README prose, using owner-provided locations. References use `[label](@name/path)`; do not repoint a name to another collection. Referencing does not imply following or access. The README describes policy, not a grant or verification of permission.
@@ -77,6 +77,6 @@ If the task also changes a folder's sharing, check what the storage will exposeâ
 
 Read followed collections' READMEs through existing tools. Identify shared targets across different names and supply source-scoped bindings to the indexer. The agent follows references as needed; the script neither interprets prose nor walks collections. Missing access is a gap, not a setup blocker. Obtain readable trees through existing tools, preserving collection-relative paths. A URL root is optional and only valid where URLs map directly to paths.
 
-Index all Markdown, including WIP. Read [INDEX.md](INDEX.md) for commands and limits. Ask before a potentially large initial retrieval. Use bounded `--partial` batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Keep source capture/version information distinct from indexing time.
+Scan all Markdown, including WIP. Read [INDEX.md](INDEX.md) for `citations.py scan`, `references`, `in`, `out` and `resolve`. Ordinary tools handle finding and reading files; before relying on a work, inspect all incoming citations with `in`. Ask before a potentially large initial retrieval. Use bounded `--partial` scan batches when needed; `--complete` requires a complete snapshot, never a selected download folder. Citation results themselves are never limited or ranked. Keep source capture/version information distinct from scanning time.
 
 Keep the follow list independent of SQLite so missing collections remain visible and the cache is rebuildable. Finish by reporting created/migrated files, Git choice, follows, index coverage and unresolved permissions. Do not claim provider synchronization merely from local presence.

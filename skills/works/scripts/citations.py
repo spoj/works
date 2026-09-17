@@ -1,0 +1,585 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import posixpath
+import re
+import sqlite3
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
+
+_DEFINITION = re.compile(r" {0,3}\[([^]\n]+)\]:[ \t]*(.*)$")
+_URL = re.compile(r"(?:https?|file)://[^\s<>\"'`]+")
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_LIST = re.compile(r"^( *)(?:[-+*]|\d+[.)])\s+")
+_HEADING = re.compile(r" {0,3}#{1,6}\s")
+
+
+@dataclass(frozen=True, slots=True)
+class Link:
+    source: Path
+    line: int
+    destination: str
+    start: int
+    end: int
+
+
+def _unescape(value: str) -> str:
+    return re.sub(r"\\(.)", r"\1", value)
+
+
+def _key(value: str) -> str:
+    return " ".join(_unescape(value).strip().split()).casefold()
+
+
+def _mask_code(line: str) -> str:
+    return re.sub(r"(`+).*?(?:\1|$)", lambda m: " " * len(m.group()), line)
+
+
+def _end(text: str, start: int, opening: str, closing: str) -> int:
+    depth = 0
+    angle = False
+    i = start
+    while i < len(text):
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if opening == "(" and char == "<":
+            angle = True
+        elif opening == "(" and char == ">" and angle:
+            angle = False
+        elif not angle and char == opening:
+            depth += 1
+        elif not angle and char == closing:
+            depth -= 1
+            if not depth:
+                return i
+        i += 1
+    return -1
+
+
+def _destination(raw: str) -> str | None:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if raw.startswith("<"):
+        match = re.match(r"<((?:\\.|[^>])*)>(.*)$", raw)
+        rest = match.group(2).strip() if match else ""
+        if not match or (rest and rest[0] not in "\"'("):
+            return None
+        return _unescape(match.group(1))
+    raw = re.sub(r"\s+(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')\s*$", "", raw)
+    return _unescape(raw)
+
+
+def _visible(text: str) -> tuple[list[str], list[str | None]]:
+    raw = text.splitlines()
+    visible = []
+    fence = None
+    for line in raw:
+        if fence:
+            visible.append(None)
+            char, length = fence
+            if re.fullmatch(f" {{0,3}}{re.escape(char)}{{{length},}}[ \\t]*", line):
+                fence = None
+            continue
+        marker = re.match(r" {0,3}(`{3,}|~{3,})", line)
+        visible.append(None if marker else _mask_code(line))
+        if marker:
+            fence = (marker.group(1)[0], len(marker.group(1)))
+    return raw, visible
+
+
+def _references(lines: list[str | None]) -> tuple[dict[str, str], set[int]]:
+    definitions = {}
+    definition_lines = set()
+    for number, line in enumerate(lines):
+        if line is None:
+            continue
+        match = _DEFINITION.fullmatch(line)
+        if match:
+            definition_lines.add(number)
+            if destination := _destination(match.group(2)):
+                definitions.setdefault(_key(match.group(1)), destination)
+    return definitions, definition_lines
+
+
+def _line_links(masked: str, original: str, source: Path, number: int, refs: dict[str, str]) -> list[Link]:
+    links = []
+    i = 0
+    while i < len(masked):
+        if masked[i] != "[":
+            i += 1
+            continue
+        label_end = _end(masked, i, "[", "]")
+        if label_end < 0:
+            i += 1
+            continue
+        after = label_end + 1
+        destination = None
+        end = label_end
+        if after < len(masked) and masked[after] == "(":
+            close = _end(masked, after, "(", ")")
+            if close >= 0:
+                destination, end = _destination(original[after + 1:close]), close
+        elif after < len(masked) and masked[after] == "[":
+            close = _end(masked, after, "[", "]")
+            if close >= 0:
+                reference = original[after + 1:close].strip() or original[i + 1:label_end]
+                destination, end = refs.get(_key(reference)), close
+        else:
+            destination = refs.get(_key(original[i + 1:label_end]))
+        if destination is None:
+            i += 1
+            continue
+        links.append(Link(source, number, destination, i, end + 1))
+        masked = masked[:i] + " " * (end + 1 - i) + masked[end + 1:]
+        i = end + 1
+    for match in _URL.finditer(masked):
+        destination = match.group().rstrip(".,;:!")
+        for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+            while destination.endswith(closing) and destination.count(closing) > destination.count(opening):
+                destination = destination[:-1]
+        links.append(Link(source, number, destination, match.start(), match.start() + len(destination)))
+    return sorted(links, key=lambda link: link.start)
+
+
+def parse_markdown(text: str, source: str | Path = Path()) -> list[Link]:
+    raw, visible = _visible(text)
+    refs, definitions = _references(visible)
+    return [link for number, line in enumerate(visible)
+            if line is not None and number not in definitions
+            for link in _line_links(line, raw[number], Path(source), number + 1, refs)]
+
+
+def citation_context(lines: list[str], link: Link) -> str:
+    first = last = link.line - 1
+    if _HEADING.match(lines[first]):
+        return lines[first]
+    while (first > 0 and lines[first - 1].strip() and not _LIST.match(lines[first])
+           and not _HEADING.match(lines[first - 1]) and not _DEFINITION.fullmatch(lines[first - 1])):
+        first -= 1
+    marker = _LIST.match(lines[first])
+    if not marker and lines[first].startswith(" "):
+        indent = len(lines[first]) - len(lines[first].lstrip())
+        for previous in range(first - 1, -1, -1):
+            candidate = _LIST.match(lines[previous])
+            if candidate and len(candidate[1]) < indent:
+                first, marker = previous, candidate
+                break
+            if lines[previous].strip() and len(lines[previous]) - len(lines[previous].lstrip()) < indent:
+                break
+    for following in range(last + 1, len(lines)):
+        text = lines[following]
+        item = _LIST.match(text)
+        if marker:
+            indent = len(marker[1])
+            if text.strip() and (len(text) - len(text.lstrip()) <= indent):
+                if item or _HEADING.match(text) or not lines[following - 1].strip():
+                    break
+        elif not text.strip() or item or _HEADING.match(text):
+            break
+        if _DEFINITION.fullmatch(text):
+            break
+        last = following
+    return "\n".join(lines[first:last + 1]).rstrip()
+
+
+def normalize_url(value: str) -> str:
+    parsed = urlsplit(value)
+    path = quote(unquote(parsed.path), safe="/:@!$&'()*+,;=-._~")
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
+
+
+def database(path: str | Path) -> sqlite3.Connection:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    if (db.execute("SELECT 1 FROM sqlite_master WHERE name = 'collections'").fetchone()
+            and db.execute("PRAGMA user_version").fetchone()[0] != 2):
+        db.close()
+        raise ValueError("citation cache schema changed; rebuild from snapshots into a new database")
+    db.executescript("""
+        PRAGMA user_version = 2;
+        CREATE TABLE IF NOT EXISTS collections (
+            name TEXT PRIMARY KEY, url_root TEXT UNIQUE,
+            attempted TEXT, complete TEXT, snapshot TEXT, complete_snapshot TEXT,
+            mode TEXT NOT NULL DEFAULT 'unindexed', errors TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS refs (
+            source TEXT NOT NULL REFERENCES collections(name),
+            alias TEXT NOT NULL, target TEXT NOT NULL REFERENCES collections(name),
+            PRIMARY KEY(source, alias)
+        );
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY,
+            collection TEXT NOT NULL REFERENCES collections(name), path TEXT NOT NULL,
+            mtime_ns INTEGER NOT NULL, size INTEGER NOT NULL, indexed TEXT NOT NULL,
+            UNIQUE(collection, path)
+        );
+        CREATE TABLE IF NOT EXISTS links (
+            source INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            line INTEGER NOT NULL, destination TEXT NOT NULL, context TEXT NOT NULL
+        );
+    """)
+    return db
+
+
+def replace_references(db: sqlite3.Connection, source: str, refs: dict[str, str]) -> None:
+    for name in [source, *refs, *refs.values()]:
+        if not _NAME.fullmatch(name):
+            raise ValueError(f"invalid collection key or reference name: {name}")
+    db.executemany("INSERT INTO collections(name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+                   [(name,) for name in {source, *refs.values()}])
+    db.execute("DELETE FROM refs WHERE source = ?", (source,))
+    db.executemany("INSERT INTO refs(source, alias, target) VALUES (?, ?, ?)",
+                   [(source, alias, target) for alias, target in refs.items()])
+
+
+def scan_collection(db: sqlite3.Connection, name: str, root: Path, complete: bool,
+                    snapshot: str = "unknown", force: bool = False, url_root: str | None = None) -> dict:
+    if not _NAME.fullmatch(name):
+        raise ValueError(f"invalid collection key: {name}")
+    if url_root is not None:
+        parsed = urlsplit(url_root)
+        if parsed.scheme not in ("http", "https", "file") or parsed.query or parsed.fragment:
+            raise ValueError("URL root must be a directory http(s) or file URL without a query or fragment")
+        url_root = normalize_url(url_root).rstrip("/") + "/"
+    db.execute("INSERT INTO collections(name) VALUES (?) ON CONFLICT(name) DO NOTHING", (name,))
+    if url_root is not None:
+        db.execute("UPDATE collections SET url_root = ? WHERE name = ?", (url_root, name))
+    previous = db.execute("SELECT errors FROM collections WHERE name = ?", (name,)).fetchone()
+    root = root.expanduser().resolve()
+    now = datetime.now(timezone.utc).isoformat()
+    prior_errors = json.loads(previous["errors"])
+    failed_paths = {error["path"] for error in prior_errors}
+    errors = [] if complete else prior_errors
+    seen = set()
+    changed = reused = removed = 0
+    if not root.is_dir():
+        errors.append({"path": ".", "error": "supplied root is not a readable directory"})
+    for directory, dirs, names in os.walk(
+        root, onerror=lambda error: errors.append({"path": str(error.filename), "error": str(error)}),
+    ):
+        for item in dirs[:]:
+            path = Path(directory) / item
+            if item == ".git":
+                dirs.remove(item)
+            elif path.is_symlink() or path.is_junction():
+                errors.append({"path": path.relative_to(root).as_posix(), "error": "directory link not followed"})
+                dirs.remove(item)
+        for item in sorted(names):
+            path = Path(directory) / item
+            if path.suffix.lower() != ".md":
+                continue
+            relative = path.relative_to(root).as_posix()
+            seen.add(relative)
+            try:
+                if path.is_symlink():
+                    raise ValueError("file link not followed")
+                stat = path.stat()
+                previous = db.execute(
+                    "SELECT mtime_ns, size FROM files WHERE collection = ? AND path = ?", (name, relative),
+                ).fetchone()
+                if (not force and relative not in failed_paths and previous
+                        and (previous["mtime_ns"], previous["size"]) == (stat.st_mtime_ns, stat.st_size)):
+                    reused += 1
+                    errors = [error for error in errors if error["path"] != relative]
+                    continue
+                body = path.read_text(encoding="utf-8-sig")
+                lines = body.splitlines()
+                links = [(link.line, link.destination, citation_context(lines, link)) for link in parse_markdown(body)]
+            except (OSError, UnicodeError, ValueError) as error:
+                errors = [item for item in errors if item["path"] != relative]
+                errors.append({"path": relative, "error": str(error)})
+                continue
+            errors = [error for error in errors if error["path"] != relative]
+            db.execute("DELETE FROM files WHERE collection = ? AND path = ?", (name, relative))
+            row = db.execute(
+                "INSERT INTO files(collection, path, mtime_ns, size, indexed) VALUES (?, ?, ?, ?, ?)",
+                (name, relative, stat.st_mtime_ns, stat.st_size, now),
+            ).lastrowid
+            db.executemany("INSERT INTO links(source, line, destination, context) VALUES (?, ?, ?, ?)",
+                           [(row, *link) for link in links])
+            changed += 1
+    if complete and not errors:
+        for row in db.execute("SELECT id, path FROM files WHERE collection = ?", (name,)).fetchall():
+            if row["path"] not in seen:
+                db.execute("DELETE FROM files WHERE id = ?", (row["id"],))
+                removed += 1
+    mode = "incomplete" if errors else "complete" if complete else "partial"
+    db.execute("""
+        UPDATE collections SET attempted = ?,
+            complete = CASE WHEN ? = 'complete' THEN ? ELSE complete END,
+            complete_snapshot = CASE WHEN ? = 'complete' THEN ? ELSE complete_snapshot END,
+            snapshot = ?, mode = ?, errors = ? WHERE name = ?
+        """, (now, mode, now, mode, snapshot, snapshot, mode, json.dumps(errors), name))
+    return {"collection": name, "mode": mode, "seen": len(seen), "changed": changed,
+            "reused": reused, "removed": removed, "errors": errors}
+
+
+def coverage(db: sqlite3.Connection) -> list[dict]:
+    rows = db.execute("""
+        SELECT collections.*, COUNT(files.id) AS indexed_files FROM collections
+        LEFT JOIN files ON files.collection = collections.name
+        GROUP BY collections.name ORDER BY collections.name
+    """)
+    return [dict(row) | {"errors": json.loads(row["errors"]), "references": dict(db.execute(
+        "SELECT alias, target FROM refs WHERE source = ? ORDER BY alias", (row["name"],),
+    ))} for row in rows]
+
+
+def collection_path(value: str) -> str:
+    path = posixpath.normpath(value)
+    if path == ".." or path.startswith(("../", "/")) or "\\" in path:
+        raise ValueError("reference path must stay inside its collection")
+    return "" if path == "." else path
+
+
+def contains(parent: str, child: str) -> bool:
+    return not parent or child == parent.rstrip("/") or child.startswith(parent.rstrip("/") + "/")
+
+
+def work_path(path: str) -> str | None:
+    folder = path.split("/", 1)[0]
+    return folder if re.fullmatch(r"(?:\d{4}-\d{2}-\d{2}-.+|_wip_.+)", folder) else None
+
+
+def resolve_reference(collection: str, source: str, destination: str, collections: dict, cached: set) -> dict:
+    parsed = urlsplit(destination)
+    target = {"collection": None, "path": None, "url": None, "status": "unchecked", "fragment": parsed.fragment}
+    if destination.startswith("@"):
+        alias, _, path = parsed.path[1:].partition("/")
+        if not _NAME.fullmatch(alias):
+            raise ValueError("invalid reference name")
+        target["path"] = collection_path(unquote(path))
+        target["collection"] = collections[collection]["references"].get(alias)
+        if target["collection"] is None:
+            target["status"] = "unbound"
+    elif parsed.scheme or parsed.netloc:
+        target["url"] = normalize_url(destination)
+        for other in sorted(collections.values(), key=lambda c: len(c["url_root"] or ""), reverse=True):
+            if other["url_root"] and contains(other["url_root"], target["url"]):
+                target["collection"] = other["name"]
+                target["path"] = collection_path(unquote(urlsplit(target["url"]).path[len(urlsplit(other["url_root"]).path):]))
+                break
+    else:
+        target["collection"] = collection
+        target["path"] = collection_path(posixpath.join(posixpath.dirname(source), unquote(parsed.path)) if parsed.path else source)
+    if target["collection"] is not None:
+        info = collections[target["collection"]]
+        if target["url"] is None and info["url_root"]:
+            target["url"] = normalize_url(urljoin(info["url_root"], quote(target["path"], safe="/")))
+        if (target["collection"], target["path"]) in cached:
+            target["status"] = "cached"
+        elif info["mode"] == "complete" and target["path"].lower().endswith(".md"):
+            target["status"] = "missing"
+    return target
+
+
+def query(db: sqlite3.Connection, direction: str, collection: str, path: str) -> dict:
+    report = coverage(db)
+    collections = {c["name"]: c for c in report}
+    if collection not in collections:
+        raise ValueError(f"unknown collection key: {collection}")
+    requested = work_path(collection_path(path))
+    if requested is None:
+        raise ValueError("supply a dated or _wip_ work path; a file inside it selects the whole work")
+    cached = {tuple(row) for row in db.execute("SELECT collection, path FROM files")}
+    groups = {}
+    unresolved = []
+    for row in db.execute("""
+        SELECT files.collection, files.path, files.indexed, links.line, links.destination, links.context
+        FROM links JOIN files ON files.id = links.source
+        ORDER BY files.collection, files.path, links.line, links.rowid
+    """):
+        item = dict(row)
+        source_work = work_path(item["path"])
+        if source_work is None:
+            continue
+        source = (item["collection"], source_work)
+        if direction == "out" and source != (collection, requested):
+            continue
+        try:
+            target = resolve_reference(item["collection"], item["path"], item["destination"], collections, cached)
+        except ValueError as error:
+            target = {"collection": None, "path": None, "url": None, "status": "invalid", "error": str(error)}
+        if target["status"] in ("unbound", "invalid"):
+            unresolved.append(item | {"target": target})
+            continue
+        target_work = work_path(target["path"]) if target["collection"] is not None else None
+        if target_work is None:
+            continue
+        destination = (target["collection"], target_work)
+        if source == destination or (direction == "in" and destination != (collection, requested)):
+            continue
+        key = source if direction == "in" else destination
+        group = groups.setdefault(key, {"collection": key[0], "work": key[1],
+                                       "state": "wip" if key[1].startswith("_wip_") else "finalized"})
+        if direction == "in":
+            files = group.setdefault("files", {})
+            file = files.setdefault(item["path"], {"path": item["path"], "indexed": item["indexed"], "citations": []})
+            file["citations"].append({"line": item["line"], "destination": item["destination"],
+                                      "target": target, "context": item["context"]})
+        else:
+            group.setdefault("targets", {})[(target["path"], target["fragment"])] = target
+    works = []
+    for key in sorted(groups):
+        group = groups[key]
+        field = "files" if direction == "in" else "targets"
+        group[field] = [group[field][key] for key in sorted(group[field])]
+        works.append(group)
+    return {"coverage": report, "collection": collection, "work": requested,
+            "direction": direction, "works": works, "unresolved": unresolved}
+
+
+def print_report(result: dict) -> None:
+    print("Coverage (cached snapshots, not live availability):")
+    for collection in result["coverage"]:
+        print(f"  {collection['name']}: {collection['mode']}; {collection['indexed_files']} Markdown files")
+        print(f"    snapshot: {collection['snapshot'] or 'unknown'}; scanned: {collection['attempted'] or 'never'}")
+        if collection["mode"] != "complete" and collection["complete"]:
+            print(f"    last complete: {collection['complete']}; {collection['complete_snapshot']}")
+        for error in collection["errors"]:
+            print(f"    WARNING {error['path']}: {error['error']}")
+    if "works" in result:
+        print(f"\n{result['direction']} {result['collection']}/{result['work']}/ — {len(result['works'])} works")
+        for work in result["works"]:
+            print(f"{work['collection']}/{work['work']}/ [{work['state']}]")
+            for file in work.get("files", []):
+                print(f"  {file['path']} (cached {file['indexed']})")
+                for citation in file["citations"]:
+                    target = citation["target"]
+                    print(f"    :{citation['line']} → {citation['destination']} [{target['status']}]")
+                    for line in citation["context"].splitlines():
+                        print(f"      {line}")
+            for target in work.get("targets", []):
+                fragment = "#" + target["fragment"] if target["fragment"] else ""
+                print(f"  {target['path']}{fragment} [{target['status']}]")
+        print("No result limits applied; compare coverage with your private follows.")
+        for item in result["unresolved"]:
+            target = item["target"]
+            print(f"\nWARNING {target['status']}: {item['collection']}/{item['path']}:{item['line']} → {item['destination']}")
+            if "error" in target:
+                print(f"  {target['error']}")
+            for line in item["context"].splitlines():
+                print(f"  {line}")
+    elif "target" in result:
+        print(f"\nDefined by: {result['collection']}; source: {result['source'] or '(collection)'}")
+        print(f"Citation: {result['destination']}")
+        for key, value in result["target"].items():
+            print(f"  {key}: {value}")
+    elif "references" in result:
+        print(f"\nReferences defined by {result['collection']}:")
+        for alias, target in sorted(result["references"].items()):
+            print(f"  @{alias} → {target}")
+    elif "scan" in result:
+        scan = result["scan"]
+        print(f"\nScanned {scan['seen']}; changed {scan['changed']}; reused {scan['reused']}; removed {scan['removed']}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    options = argparse.ArgumentParser(add_help=False)
+    options.add_argument("--db", type=Path, default=argparse.SUPPRESS, help="private cache (default: .works/index.sqlite)")
+    options.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="structured output, with the same complete citations")
+    parser = argparse.ArgumentParser(
+        parents=[options], description="Look up cross-work citations. No search, ranking, network access or result limits.",
+        epilog="Find and read Markdown normally; run 'in COLLECTION WORK' before relying on a work. Names come from the citing collection's README, not Git remotes.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for direction, description in (("in", "all works citing this work, including every occurrence and full context"),
+                                   ("out", "all works cited by this work, with distinct target paths")):
+        sub = commands.add_parser(direction, parents=[options], help=description, description=description)
+        sub.add_argument("collection", metavar="COLLECTION")
+        sub.add_argument("path", metavar="WORK", help="dated or _wip_ folder; a file inside it also selects the whole work")
+    resolve = commands.add_parser("resolve", parents=[options], help="explain a citation's collection, path, provider URL and cache status")
+    resolve.add_argument("destination", metavar="CITATION")
+    resolve.add_argument("--from", dest="collection", required=True, metavar="COLLECTION", help="collection whose README defines the names")
+    resolve.add_argument("--source", default="", metavar="FILE", help="collection-relative citing file; required for relative links")
+    scan = commands.add_parser("scan", parents=[options], help="scan a supplied local Markdown snapshot; never fetch or publish")
+    scan.add_argument("collection", metavar="COLLECTION")
+    scan.add_argument("--root", type=Path, required=True, metavar="SNAPSHOT")
+    mode = scan.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--complete", action="store_true", help="full supplied inventory; remove missing files only after success")
+    mode.add_argument("--partial", action="store_true", help="update supplied files without deleting omitted ones")
+    scan.add_argument("--snapshot", default="unknown", help="source capture time or revision, not scanning time")
+    scan.add_argument("--url-root", help="path-addressable provider URL prefix; omission leaves the mapping unchanged")
+    scan.add_argument("--force", action="store_true", help="reread unchanged size/mtime")
+    refs = commands.add_parser("references", parents=[options], help="private name bindings interpreted from collection READMEs; not Git remotes")
+    actions = refs.add_subparsers(dest="action", required=True)
+    for action in ("list", "add", "remove"):
+        sub = actions.add_parser(action, parents=[options])
+        sub.add_argument("collection", metavar="SOURCE_COLLECTION")
+        if action != "list":
+            sub.add_argument("alias", metavar="NAME")
+        if action == "add":
+            sub.add_argument("target", metavar="TARGET_COLLECTION")
+    commands.add_parser("coverage", parents=[options], help="cached coverage, snapshot dates and failures; compare with private follows")
+    forget = commands.add_parser("forget", parents=[options], help="clear a collection's cached files/bindings; retain identity and incoming citations")
+    forget.add_argument("collection", metavar="COLLECTION")
+    args = parser.parse_args(argv, namespace=argparse.Namespace(db=Path(".works/index.sqlite"), json=False))
+    creating = args.command == "scan" or (args.command == "references" and args.action == "add")
+    if not creating and not args.db.is_file():
+        parser.error("citation cache does not exist; scan readable snapshots and compare coverage with private follows")
+    try:
+        with database(args.db) as db:
+            status = 0
+            if args.command == "scan":
+                scanned = scan_collection(db, args.collection, args.root, args.complete, args.snapshot, args.force, args.url_root)
+                result = {"coverage": coverage(db), "scan": scanned}
+                status = int(bool(scanned["errors"]))
+            elif args.command in ("in", "out"):
+                result = query(db, args.command, args.collection, args.path)
+            else:
+                report = coverage(db)
+                collections = {c["name"]: c for c in report}
+                if args.command != "coverage" and not creating and args.collection not in collections:
+                    raise ValueError(f"unknown collection key: {args.collection}")
+                if args.command == "resolve":
+                    if not (args.destination.startswith("@") or urlsplit(args.destination).scheme or args.source):
+                        raise ValueError("relative citations require --source FILE")
+                    cached = {tuple(row) for row in db.execute("SELECT collection, path FROM files")}
+                    source = collection_path(args.source)
+                    target = resolve_reference(args.collection, source, args.destination, collections, cached)
+                    result = {"coverage": report, "collection": args.collection, "source": source,
+                              "destination": args.destination, "target": target}
+                elif args.command == "references":
+                    mapping = dict(db.execute("SELECT alias, target FROM refs WHERE source = ?", (args.collection,)))
+                    if args.action == "add":
+                        if args.alias in mapping and mapping[args.alias] != args.target:
+                            raise ValueError("name is already bound; do not silently repoint historical citations")
+                        mapping[args.alias] = args.target
+                    elif args.action == "remove":
+                        if args.alias not in mapping:
+                            raise ValueError(f"unknown reference name: {args.alias}")
+                        del mapping[args.alias]
+                    if args.action != "list":
+                        replace_references(db, args.collection, mapping)
+                    result = {"coverage": coverage(db), "collection": args.collection, "references": mapping}
+                elif args.command == "forget":
+                    db.execute("DELETE FROM files WHERE collection = ?", (args.collection,))
+                    db.execute("DELETE FROM refs WHERE source = ?", (args.collection,))
+                    db.execute("""UPDATE collections SET attempted = NULL, complete = NULL, snapshot = NULL,
+                        complete_snapshot = NULL, mode = 'unindexed', errors = '[]' WHERE name = ?""", (args.collection,))
+                    result = {"coverage": coverage(db)}
+                else:
+                    result = {"coverage": report}
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print_report(result)
+        return status
+    except (OSError, ValueError, sqlite3.Error) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
